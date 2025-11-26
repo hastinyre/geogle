@@ -1,23 +1,22 @@
 class NativeSocket {
   constructor() {
     this.events = {};
-    this.id = null; 
+    this.id = null;
     
-    // 1. Session Persistence: Check for existing session
+    // 1. Session Persistence: Recover ID from storage
     this.sessionId = localStorage.getItem("geogle_session_id") || null;
 
-    // Determine WebSocket URL
     const protocol = window.location.protocol === "https:" ? "wss" : "ws";
     const host = window.location.host;
-    this.url = `${protocol}://${host}/ws`;
+    // Pass session ID in URL for immediate server recognition
+    const query = this.sessionId ? `?sessionId=${this.sessionId}` : "";
+    this.url = `${protocol}://${host}/ws${query}`;
     
     this.connect();
   }
 
   connect() {
-    // Append sessionId to URL if it exists so server can identify us
-    const fullUrl = this.sessionId ? `${this.url}?sessionId=${this.sessionId}` : this.url;
-    this.ws = new WebSocket(fullUrl);
+    this.ws = new WebSocket(this.url);
 
     this.ws.onopen = () => {
       console.log("Connected to Cloudflare Worker");
@@ -33,7 +32,7 @@ class NativeSocket {
           return;
         }
 
-        // 3. Init: Save new ID and Session
+        // 3. Init: Store the Session ID assigned by server
         if (data.event === "init") {
           this.id = data.id;
           if (data.sessionId) {
@@ -74,14 +73,6 @@ class NativeSocket {
   removeAllListeners(event) {
     if (event) delete this.events[event];
     else this.events = {};
-  }
-  
-  once(event, callback) {
-    const wrapper = (payload) => {
-      callback(payload);
-      this.events[event] = this.events[event].filter(cb => cb !== wrapper);
-    };
-    this.on(event, wrapper);
   }
 }
 

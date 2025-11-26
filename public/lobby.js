@@ -99,7 +99,6 @@ function updateLobbyUI(lobby) {
   const showSettings = IS_HOST && (lobby.type === 'private' || lobby.type === 'single');
   document.getElementById("host-settings").classList.toggle("hidden", !showSettings);
 
-  // --- CHANGED: Update Active Segmented Button ---
   if (showSettings && lobby.settings && lobby.settings.gameType) {
     document.querySelectorAll(".seg-btn").forEach(btn => {
       if (btn.value === lobby.settings.gameType) btn.classList.add("active");
@@ -115,7 +114,6 @@ function updateLobbyUI(lobby) {
 
 // --- LISTENERS ---
 
-// --- CHANGED: Segmented Control Logic ---
 document.querySelectorAll(".seg-btn").forEach(btn => {
   btn.onclick = () => {
     if (IS_HOST) {
@@ -167,13 +165,33 @@ socket2.on("lobbyCreated", (data) => {
 });
 socket2.on("initStats", (stats) => { CONTINENT_DATA = stats; });
 
+// [UPDATED] Auto-Rehydration & UI Logic
 socket2.on("lobbyUpdate", (lobby) => {
+  // 1. Rehydration Check: If we just reloaded, restore USERNAME
+  if (!window.USERNAME && lobby.players && socket2.id && lobby.players[socket2.id]) {
+    window.USERNAME = lobby.players[socket2.id].username;
+  }
+
+  // 2. Navigation Logic:
+  // If we are getting an update, we should probably be seeing the lobby.
+  // Exception: If we are already playing (game-screen) or seeing results (game-over-screen), don't jump back.
   const active = document.querySelector(".screen:not(.hidden)");
   if (!active || (active.id !== "game-screen" && active.id !== "game-over-screen")) {
     show("lobby-room");
   }
+
+  // 3. Normal UI Update
   updateLobbyUI(lobby);
 });
+
+// Kicked Listener
+socket2.on("kicked", () => {
+  alert("You have been kicked from the lobby.");
+  CURRENT_LOBBY = null;
+  window.USERNAME = ""; 
+  show("mode-screen"); 
+});
+
 
 document.getElementById("back-to-mode-btn").onclick = () => show("mode-screen");
 document.getElementById("create-lobby-btn").onclick = () => socket2.emit("createLobby", { username: window.USERNAME });

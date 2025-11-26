@@ -25,9 +25,17 @@ function start(broadcast, lobby, { config, data }) {
   let currentIndex = 0;
   let currentTimer = null;
   let isRoundActive = false;
-
-  // Store decision for the next round (or the first round)
   let nextRoundInfo = null;
+
+  // Initialize Game State for Snapshots
+  lobby.gameState = {
+    active: true,
+    questionIndex: 0,
+    totalQuestions: questions.length,
+    currentQuestion: null,
+    startTime: 0,
+    timeLimit: lobby.settings.timeLimit
+  };
 
   function determineQuestionType() {
     const type = lobby.settings.gameType || 'mixed';
@@ -46,26 +54,28 @@ function start(broadcast, lobby, { config, data }) {
     const answersThisRound = new Set(); 
     isRoundActive = true;
 
-    // Use pre-calculated type if available, otherwise calculate now
     const useMap = nextRoundInfo ? nextRoundInfo.useMap : determineQuestionType();
     nextRoundInfo = null; 
     
     const imagePath = useMap ? `maps/${q.code}.svg` : (q.flag_4x3 || `flags/4x3/${q.code}.svg`);
-
-    // --- PREPARE CLIENT PREDICTION DATA ---
-    // Find all synonyms that point to this specific country name
-    // e.g. If q.name is "United States", find ["usa", "america", ...]
     const relevantSynonyms = Object.keys(data.synonyms).filter(key => data.synonyms[key] === q.name);
 
-    broadcast("questionStart", {
+    // [SNAPSHOT] Update Lobby State
+    lobby.gameState.currentQuestion = {
       index: currentIndex + 1,
       total: questions.length,
       flagPath: imagePath,
       imageType: useMap ? 'map' : 'flag',
+      target: q.name,
+      synonyms: relevantSynonyms
+    };
+    lobby.gameState.startTime = Date.now();
+    lobby.gameState.isRoundActive = true;
+
+    broadcast("questionStart", {
+      ...lobby.gameState.currentQuestion,
       timeLimit: lobby.settings.timeLimit,
-      playerCount: Object.keys(lobby.players).length,
-      target: q.name,          // For client prediction
-      synonyms: relevantSynonyms // For client prediction (to avoid false reds)
+      playerCount: Object.keys(lobby.players).length
     });
 
     const startTime = Date.now();
@@ -73,17 +83,15 @@ function start(broadcast, lobby, { config, data }) {
     function finishQuestion() {
       if (!isRoundActive) return;
       isRoundActive = false;
+      lobby.gameState.isRoundActive = false; // Mark round as done in state
+      
       clearTimeout(currentTimer);
 
-      // --- PRELOAD LOGIC (Next Question) ---
       let preloadData = null;
       if (currentIndex + 1 < questions.length) {
         const nextQ = questions[currentIndex + 1];
         const nextUseMap = determineQuestionType();
-        
-        // Store this decision
         nextRoundInfo = { useMap: nextUseMap };
-
         const nextPath = nextUseMap ? `maps/${nextQ.code}.svg` : (nextQ.flag_4x3 || `flags/4x3/${nextQ.code}.svg`);
         preloadData = { url: nextPath };
       }
@@ -129,6 +137,7 @@ function start(broadcast, lobby, { config, data }) {
 
   function endGame() {
     lobby.gameInProgress = false;
+    lobby.gameState = null; // Clear state
     lobby.currentAnswerHandler = null;
     Object.keys(lobby.players).forEach(pid => lobby.readyState[pid] = false);
     
@@ -141,25 +150,18 @@ function start(broadcast, lobby, { config, data }) {
     broadcast("lobbyUpdate", lobby);
   }
 
-  // --- PRELOAD QUESTION 1 ---
+  // Preload Q1 Logic
   if (questions.length > 0) {
     const firstQ = questions[0];
     const firstUseMap = determineQuestionType();
-    
-    // Lock in the decision for Q1
     nextRoundInfo = { useMap: firstUseMap };
-    
     const firstPath = firstUseMap ? `maps/${firstQ.code}.svg` : (firstQ.flag_4x3 || `flags/4x3/${firstQ.code}.svg`);
     
-    // Tell client to download NOW
     broadcast("gamePreload", { url: firstPath });
-    
-    // Wait 1.5s before starting Q1 to give time for download
     setTimeout(() => {
         if (lobby.gameInProgress) sendQuestion();
     }, 1500);
   } else {
-    // Edge case: 0 questions
     endGame();
   }
 }

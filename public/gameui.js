@@ -36,22 +36,15 @@ function checkLocalAnswer(input, targetRaw, synonyms) {
   const inp = clean(input);
   const tgt = clean(targetRaw);
   
-  // 1. Direct Match
   if (inp === tgt) return true;
-  
-  // 2. Synonym Match
   if (Array.isArray(synonyms)) {
     for (let s of synonyms) {
       if (clean(s) === inp) return true;
     }
   }
-
-  // 3. Fuzzy Check
   const dist = levenshtein(inp, tgt);
   const maxLen = Math.max(inp.length, tgt.length);
   const score = (1 - dist / maxLen) * 100;
-  
-  // Short names strict, long names loose
   if (tgt.length <= 4) return score > 95;
   return score >= 85; 
 }
@@ -72,33 +65,22 @@ function addTickerItem(username, isGood) {
 socket3.on("gameStarting", () => {
   show("game-screen");
   
-  // --- GHOST CLEANUP (The Janitor) ---
-  
-  // 1. Clear Image
   const img = document.getElementById("flag-img");
   img.src = ""; 
   img.classList.add("loading-hidden");
   
-  // 2. Reset Mode
   const area = document.getElementById("flag-area");
   area.classList.remove("map-mode");
 
-  // 3. Reset Ticker & Progress
   document.getElementById("feedback-ticker").innerHTML = "";
   document.getElementById("progress-indicator").innerText = "";
-  
-  // 4. Reset Timer Bar
   document.getElementById("timer-bar").style.width = "100%";
   
-  // 5. Reset Input Styling
   const inp = document.getElementById("answer-input");
   inp.value = "";
-  inp.className = ""; // Removes input-correct/wrong
-  
-  // 6. Reset Counter Text
+  inp.className = ""; 
   document.getElementById("question-counter").innerText = "Get Ready!";
 
-  // --- START COUNTDOWN ---
   const overlay = document.getElementById("countdown-overlay");
   overlay.classList.remove("hidden");
   
@@ -123,11 +105,17 @@ socket3.on("gamePreload", ({ url }) => {
   }
 });
 
-socket3.on("questionStart", ({ index, total, flagPath, timeLimit, playerCount, imageType, target, synonyms }) => {
+// [UPDATED] Handle Late Joins via 'remainingTime'
+socket3.on("questionStart", ({ index, total, flagPath, timeLimit, playerCount, imageType, target, synonyms, remainingTime }) => {
+  
+  // Ensure we are viewing the game screen (Rehydration logic support)
+  if (document.getElementById("game-screen").classList.contains("hidden")) {
+    show("game-screen");
+  }
+
   MY_SUBMITTED = false;
   CURRENT_PLAYER_COUNT = playerCount;
   
-  // Store Prediction Data
   CURRENT_TARGET = target;
   CURRENT_SYNONYMS = synonyms || [];
   
@@ -136,20 +124,11 @@ socket3.on("questionStart", ({ index, total, flagPath, timeLimit, playerCount, i
   const img = document.getElementById("flag-img");
   const area = document.getElementById("flag-area");
 
-  // 1. Hide briefly
   img.classList.add("loading-hidden");
-  
-  // 2. Toggle "Map Mode" on the Container
-  if (imageType === 'map') {
-    area.classList.add("map-mode");
-  } else {
-    area.classList.remove("map-mode");
-  }
+  if (imageType === 'map') area.classList.add("map-mode");
+  else area.classList.remove("map-mode");
 
-  // 3. Set Source
   img.src = flagPath;
-
-  // 4. Show when ready
   img.onload = () => {
     img.classList.remove("loading-hidden");
   };
@@ -165,16 +144,25 @@ socket3.on("questionStart", ({ index, total, flagPath, timeLimit, playerCount, i
   
   document.getElementById("answer-btn").disabled = false;
 
+  // --- TIMER LOGIC ---
   const bar = document.getElementById("timer-bar");
-  bar.style.width = "100%";
   
   if (TIMER_INTERVAL) clearInterval(TIMER_INTERVAL);
+
+  // If remainingTime is provided (Late Join), use it. Else full time.
+  const initialTime = (remainingTime !== undefined) ? remainingTime : timeLimit;
+  
+  // Set initial width
+  bar.style.width = ((initialTime / timeLimit) * 100) + "%";
+  
   const start = Date.now();
   TIMER_INTERVAL = setInterval(() => {
     const elapsed = (Date.now() - start) / 1000;
-    const remain = Math.max(0, timeLimit - elapsed);
-    bar.style.width = ((remain / timeLimit) * 100) + "%";
-    if (remain <= 0) clearInterval(TIMER_INTERVAL);
+    const currentRemaining = Math.max(0, initialTime - elapsed);
+    
+    bar.style.width = ((currentRemaining / timeLimit) * 100) + "%";
+    
+    if (currentRemaining <= 0) clearInterval(TIMER_INTERVAL);
   }, 50);
 });
 
@@ -187,12 +175,10 @@ function submitGuess() {
   document.getElementById("answer-input").disabled = true;
   document.getElementById("answer-btn").disabled = true;
   
-  // Freeze Timer ONLY if single player
   if (CURRENT_PLAYER_COUNT === 1) {
     clearInterval(TIMER_INTERVAL);
   }
 
-  // --- CLIENT SIDE PREDICTION (Instant Binary Choice) ---
   const isLikelyCorrect = checkLocalAnswer(val, CURRENT_TARGET, CURRENT_SYNONYMS);
   const inp = document.getElementById("answer-input");
   
@@ -203,7 +189,6 @@ function submitGuess() {
     inp.classList.add("input-wrong");
     addTickerItem(window.USERNAME || "You", false);
   }
-  // -----------------------------------------------------
   
   socket3.emit("submitAnswer", { answer: val });
 }
@@ -215,11 +200,9 @@ document.getElementById("answer-input").onkeydown = (e) => {
 
 socket3.on("answerResult", ({ correct }) => {
   const inp = document.getElementById("answer-input");
-  // Server is ultimate truth. If we made a mistake in local prediction (rare), correct it.
   const hasCorrect = inp.classList.contains("input-correct");
   const hasWrong = inp.classList.contains("input-wrong");
 
-  // If we haven't styled it yet (shouldn't happen) OR if server disagrees with local
   if ((!hasCorrect && !hasWrong) || (correct && hasWrong) || (!correct && hasCorrect)) {
       inp.classList.remove("input-correct", "input-wrong");
       if (correct) inp.classList.add("input-correct");
@@ -230,11 +213,8 @@ socket3.on("answerResult", ({ correct }) => {
 socket3.on("playerUpdate", ({ username, isCorrect, answeredCount, totalPlayers }) => {
   document.getElementById("progress-indicator").innerText = `${answeredCount}/${totalPlayers} Answered`;
   
-  // If we predicted our own result, don't show the ticker again
   const myUsername = window.USERNAME || "You";
-  if (username === myUsername) {
-     // We already showed our ticker item instantly. Do nothing.
-  } else {
+  if (username !== myUsername) {
      addTickerItem(username, isCorrect);
   }
 });
