@@ -12,18 +12,16 @@ const data = {
   continentCounts: { "all": 0 }
 };
 
-// 1. Normalize Data (Run once on startup)
+// 1. Normalize Data
 function normalize(str) {
   return str ? str.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/gi, " ").trim() : "";
 }
 
 // Process Data
 (function initData() {
-  // Synonyms
   for (const [key, val] of Object.entries(synonymsRaw)) {
     data.synonyms[normalize(key)] = val;
   }
-  // Countries
   countriesRaw.forEach(c => {
     const normName = normalize(c.name);
     const tokens = normName.split(" ").filter(Boolean);
@@ -52,27 +50,54 @@ export class GameLobby {
   constructor(state, env) {
     this.state = state;
     this.lobbies = {}; 
-    this.sessions = new Map(); // WebSocket -> { playerId, lobbyCode }
+    this.sessions = new Map(); // WebSocket -> { playerId, lobbyCode, lastSeen, sessionId }
+
+    // [HEARTBEAT LOOP]: Check for dead connections every 10 seconds
+    setInterval(() => this.cleanupZombies(), 10000);
   }
 
   async fetch(request) {
+    const url = new URL(request.url);
+    const existingSessionId = url.searchParams.get("sessionId");
+
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
-    this.handleSession(server);
+    this.handleSession(server, existingSessionId);
     return new Response(null, { status: 101, webSocket: client });
   }
 
-  handleSession(ws) {
+  handleSession(ws, existingSessionId) {
     ws.accept();
-    const playerId = crypto.randomUUID().slice(0, 8);
-    this.sessions.set(ws, { playerId, lobbyCode: null });
+    
+    // Identity Persistence: Reuse ID if session matches, else new ID
+    // (Simplified for now: We just treat sessionId as the persistent ID if provided)
+    const playerId = existingSessionId || crypto.randomUUID().slice(0, 8);
+    const sessionId = playerId; // For now, 1-to-1 mapping
 
-    // Send Init
-    ws.send(JSON.stringify({ event: "init", id: playerId }));
+    this.sessions.set(ws, { 
+      playerId, 
+      lobbyCode: null, 
+      lastSeen: Date.now(),
+      sessionId 
+    });
+
+    // Send Init (give client the ID to store)
+    ws.send(JSON.stringify({ event: "init", id: playerId, sessionId }));
+
+    // [DISCOVERY FIX]: Send the lobby list IMMEDIATELY upon connection
+    const list = this.getLobbyListPayload();
+    ws.send(JSON.stringify({ event: "lobbyList", payload: list }));
 
     ws.addEventListener("message", msg => {
       try {
         const { event, payload } = JSON.parse(msg.data);
+        
+        // Update Heartbeat
+        const sess = this.sessions.get(ws);
+        if (sess) sess.lastSeen = Date.now();
+
+        if (event === "pong") return; // Handled heartbeat
+
         this.handleEvent(ws, playerId, event, payload);
       } catch (e) { console.error(e); }
     });
@@ -84,6 +109,37 @@ export class GameLobby {
       }
       this.sessions.delete(ws);
     });
+  }
+
+  // --- HEARTBEAT & CLEANUP ---
+  cleanupZombies() {
+    const now = Date.now();
+    // 1. Ping everyone
+    for (const [ws, sess] of this.sessions.entries()) {
+      try { ws.send(JSON.stringify({ event: "ping" })); } catch(e) {}
+      
+      // 2. Kill if silent for > 35 seconds
+      if (now - sess.lastSeen > 35000) {
+        console.log(`Killing zombie connection: ${sess.playerId}`);
+        if (sess.lobbyCode) this.leaveLobby(ws, sess.lobbyCode, sess.playerId);
+        ws.close();
+        this.sessions.delete(ws);
+      }
+    }
+  }
+
+  getLobbyListPayload() {
+    return Object.values(this.lobbies)
+      .filter(l => !l.gameInProgress && l.type === 'private')
+      .map(l => ({ code: l.code, name: l.name, count: Object.keys(l.players).length }));
+  }
+
+  broadcastLobbyList() {
+    const list = this.getLobbyListPayload();
+    const msg = JSON.stringify({ event: "lobbyList", payload: list });
+    for (const [ws, sess] of this.sessions.entries()) {
+        try { ws.send(msg); } catch(e) {}
+    }
   }
 
   // --- CORE EVENT HANDLER ---
@@ -121,7 +177,6 @@ export class GameLobby {
         this.submitAnswer(code, playerId, payload.answer, ws);
         break;
       case "voiceSignal":
-        // NEW: Forward WebRTC handshake signals
         this.handleVoiceSignal(code, playerId, payload);
         break;
     }
@@ -134,7 +189,6 @@ export class GameLobby {
     if (!lobby) return;
     const { targetId, signal } = payload;
     
-    // Find target socket
     for (const [ws, sess] of this.sessions.entries()) {
       if (sess.lobbyCode === code && sess.playerId === targetId) {
         ws.send(JSON.stringify({ 
@@ -205,6 +259,8 @@ export class GameLobby {
     const sess = this.sessions.get(ws);
     if (sess) sess.lobbyCode = code;
 
+    // Preserve existing player object if rejoining? 
+    // For now, simpler to overwrite or update username.
     lobby.players[playerId] = { id: playerId, username };
     lobby.readyState[playerId] = false;
     
@@ -257,10 +313,19 @@ export class GameLobby {
     lobby.gameInProgress = true;
     this.broadcastToLobby(code, "gameStarting", lobby.settings);
     
-    const broadcastFn = (evt, payload) => this.broadcastToLobby(code, evt, payload);
+    // [REAPPEARING FIX]: Intercept events to detect Game Over
+    const broadcastFn = (evt, payload) => {
+      this.broadcastToLobby(code, evt, payload);
+      
+      // If the engine says "gameOver", the lobby is free again.
+      // Update the global list so it reappears!
+      if (evt === "gameOver") {
+        this.broadcastLobbyList(); 
+      }
+    };
 
     startGameEngine(broadcastFn, lobby, { config, data });
-    this.broadcastLobbyList();
+    this.broadcastLobbyList(); // Hide it immediately on start
   }
 
   submitAnswer(code, playerId, answer, ws) {
@@ -289,17 +354,6 @@ export class GameLobby {
       if (sess.lobbyCode === code) {
         try { ws.send(msg); } catch(e) {}
       }
-    }
-  }
-
-  broadcastLobbyList() {
-    const list = Object.values(this.lobbies)
-      .filter(l => !l.gameInProgress && l.type === 'private')
-      .map(l => ({ code: l.code, name: l.name, count: Object.keys(l.players).length }));
-    
-    const msg = JSON.stringify({ event: "lobbyList", payload: list });
-    for (const [ws, sess] of this.sessions.entries()) {
-        try { ws.send(msg); } catch(e) {}
     }
   }
 }
