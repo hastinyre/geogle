@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Geogle</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="native-socket.js"></script>
+</head>
+<body>
+
+  <!-- USERNAME -->
+  <div id="username-screen" class="screen">
+    <h2>Welcome</h2>
+    <input type="text" id="username-input" placeholder="Username" maxlength="15" />
+    <button id="username-btn" class="action-btn">Continue</button>
+  </div>
+
+  <!-- MODE SELECT -->
+  <div id="mode-screen" class="screen hidden">
+    <h2>Select Mode</h2>
+    <button id="public-btn">Matchmaking (1v1)</button>
+    <button id="private-btn">Private Lobby</button>
+    <button id="single-btn" class="secondary-btn">Single Player</button>
+  </div>
+
+  <!-- PRIVATE MENU -->
+  <div id="private-menu" class="screen hidden">
+    <h2>Private Lobbies</h2>
+    <button id="create-lobby-btn">Create New Lobby</button>
+    <button id="join-lobby-btn">Join Existing Lobby</button>
+    <button id="back-to-mode-btn" class="secondary-btn">Back</button>
+  </div>
+
+  <!-- JOIN LIST -->
+  <div id="join-lobby-screen" class="screen hidden">
+    <h2>Join Lobby</h2>
+    <div id="lobby-list"></div>
+    <div class="join-controls">
+      <input type="tel" id="join-code-input" maxlength="4" placeholder="Enter 4-Digit Code" />
+      <button id="join-code-btn" class="action-btn">Join</button>
+    </div>
+    <button id="join-back-btn" class="secondary-btn">Back</button>
+  </div>
+
+  <!-- LOBBY ROOM -->
+  <div id="lobby-room" class="screen hidden">
+    <h2 id="lobby-room-title">Lobby</h2>
+    
+    <div class="code-display">
+      <span id="lobby-status-text">Code:</span> 
+      <span id="lobby-room-code">----</span>
+    </div>
+
+    <div id="player-list-container"></div>
+
+    <div id="host-settings" class="host-only hidden">
+      <h3>Settings</h3>
+      
+      <div class="segmented-control">
+        <button id="type-flags" class="seg-btn" value="flags">Flags 🏳️</button>
+        <button id="type-shapes" class="seg-btn" value="maps">Shapes 🗺️</button>
+        <button id="type-mixed" class="seg-btn" value="mixed">Mixed 🎲</button>
+      </div>
+
+      <div class="chk-group">
+        <label><input type="checkbox" class="cont-chk" value="Asia"> Asia</label>
+        <label><input type="checkbox" class="cont-chk" value="Europe"> Europe</label>
+        <label><input type="checkbox" class="cont-chk" value="Africa"> Africa</label>
+        <label><input type="checkbox" class="cont-chk" value="North America"> N. Amer</label>
+        <label><input type="checkbox" class="cont-chk" value="South America"> S. Amer</label>
+        <label><input type="checkbox" class="cont-chk" value="Oceania"> Oceania</label>
+      </div>
+      
+      <div class="settings-row">
+        <div class="input-wrapper">
+          <label>Questions</label>
+          <div class="input-group">
+            <input type="number" id="questions-input" min="5" value="10" />
+            <button id="max-q-btn" class="max-btn">Max</button>
+          </div>
+        </div>
+        <div class="input-wrapper">
+          <label>Time (s)</label>
+          <input type="number" id="time-input" min="3" max="20" value="10" />
+        </div>
+      </div>
+
+      <button id="start-game-btn" class="action-btn">Start Game</button>
+    </div>
+
+    <div id="player-ready-area">
+      <button id="ready-btn">Ready</button>
+      <button id="leave-lobby-btn" class="secondary-btn">Leave</button>
+    </div>
+  </div>
+
+  <!-- GAME SCREEN -->
+  <div id="game-screen" class="screen hidden">
+    <div id="game-main-layout">
+      <div id="game-header">
+        <h3 id="question-counter">Q 1/10</h3>
+        <div id="timer-wrapper"><div id="timer-bar"></div></div>
+      </div>
+      
+      <div id="flag-area">
+        <div id="countdown-overlay" class="hidden"></div>
+        <img id="flag-img" src="" alt="Flag" />
+      </div>
+      
+      <div id="feedback-ticker"></div>
+      <div id="progress-indicator">Waiting...</div>
+      <div id="answer-area">
+        <input type="text" id="answer-input" placeholder="Guess the country..." autocomplete="off" />
+        <button id="answer-btn">Submit</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- GAME OVER -->
+  <div id="game-over-screen" class="screen hidden">
+    <h2>Results</h2>
+    <table id="leaderboard-table">
+      <thead>
+        <tr>
+          <th>#</th><th>Player</th><th>Pts</th><th>Avg Time</th>
+        </tr>
+      </thead>
+      <tbody id="leaderboard-body"></tbody>
+    </table>
+    <br/>
+    <div class="game-over-actions">
+      <button id="back-to-lobby-btn" class="action-btn">Play Again</button>
+      <button id="home-btn" class="secondary-btn">Home</button>
+    </div>
+  </div>
+
+  <script src="client.js"></script>
+  <script src="lobby.js"></script>
+  <script src="gameui.js"></script>
+</body>
+</html>

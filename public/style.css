@@ -1,0 +1,153 @@
+/* BASE */
+body { background: #121212; color: #eee; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; text-align: center; margin: 0; overscroll-behavior: none; }
+.screen { display: none; padding: 15px; max-width: 500px; margin: 0 auto; }
+.screen:not(.hidden) { display: block; }
+.hidden { display: none !important; }
+
+/* INPUTS & BUTTONS */
+input, button { box-sizing: border-box; width: 100%; padding: 14px; margin-bottom: 10px; border-radius: 8px; font-size: 16px; border: none; }
+input { background: #2c2c2c; color: white; border: 1px solid #444; outline: none; text-align: center; }
+input:focus { border-color: #007acc; background: #333; }
+button { background: #333; color: white; font-weight: 600; cursor: pointer; transition: transform 0.1s, background 0.2s; }
+button:active { transform: scale(0.98); }
+.action-btn { background: #28a745; }
+.action-btn:hover { background: #218838; }
+.secondary-btn { background: #444; }
+.secondary-btn:hover { background: #555; }
+
+/* SEGMENTED CONTROL */
+.segmented-control { display: flex; width: 100%; margin-bottom: 15px; }
+.seg-btn { flex: 1; background: #222; border: 1px solid #444; margin-bottom: 0; border-radius: 0; font-size: 0.9em; color: #aaa; }
+.seg-btn:first-child { border-top-left-radius: 8px; border-bottom-left-radius: 8px; }
+.seg-btn:last-child { border-top-right-radius: 8px; border-bottom-right-radius: 8px; }
+.seg-btn + .seg-btn { border-left: none; }
+.seg-btn.active { background: #007acc; color: white; border-color: #007acc; }
+
+/* SETTINGS LAYOUT */
+.settings-row { display: flex; gap: 10px; margin-bottom: 15px; }
+.input-wrapper { flex: 1; text-align: left; }
+.input-wrapper label { display: block; font-size: 0.8em; margin-bottom: 5px; color: #aaa; }
+.input-group { display: flex; gap: 0; }
+.input-group input { border-top-right-radius: 0; border-bottom-right-radius: 0; margin-bottom: 0; }
+.max-btn { width: auto !important; border-top-left-radius: 0; border-bottom-left-radius: 0; margin-bottom: 0; padding: 0 15px; font-size: 0.9em; background: #444; }
+.max-btn.active { background: #007acc; color: white; }
+.chk-group { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; text-align: left; margin-bottom: 15px; }
+.chk-group label { display: block; font-size: 0.9em; background: #222; padding: 8px; border-radius: 4px; }
+
+/* LOBBY ITEM */
+.lobby-item { background: #1f1f1f; border: 1px solid #333; padding: 15px; margin-bottom: 10px; border-radius: 8px; text-align: left; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+.lobby-item:hover { background: #2a2a2a; border-color: #555; }
+.lobby-name { font-weight: bold; color: #ffc107; }
+.lobby-count { color: #888; font-size: 0.9em; }
+.code-display { background: #222; padding: 15px; border-radius: 8px; margin-bottom: 20px; font-size: 1.2em; border: 1px dashed #555; }
+#lobby-room-code { color: #28a745; font-family: monospace; font-size: 1.4em; letter-spacing: 2px; font-weight: bold; }
+.player-row { background: #222; padding: 12px; border-bottom: 1px solid #333; display: flex; justify-content: space-between; align-items: center; }
+.player-row:first-child { border-top-left-radius: 8px; border-top-right-radius: 8px; }
+.player-row:last-child { border-bottom: none; border-bottom-left-radius: 8px; border-bottom-right-radius: 8px; }
+.kick-btn { width: 28px !important; height: 28px !important; padding: 0 !important; line-height: 28px; background: #d9534f; color: white; border-radius: 4px; font-size: 18px; margin-left: 10px; display: inline-block; text-align: center; }
+
+/* GAME UI STRUCTURE */
+
+#flag-area {
+  /* The Stage (Container) */
+  height: 220px;
+  background: #000;
+  border-radius: 8px;
+  /* Flexbox to center the image content */
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  position: relative;
+  overflow: hidden;
+  padding: 5px; /* Adds breathing room so borders don't get cut */
+  
+  /* DEFAULT STATE (Flags): No border on the box */
+  border: none; 
+}
+
+#flag-img {
+  /* The Actor (Image) */
+  /* Remove fixed sizes so it respects aspect ratio */
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+
+  /* FLAG MODE (Default): Red border hugs the image */
+  border: 5px solid #b71c1c;
+  box-shadow: 0 0 10px rgba(183, 28, 28, 0.3);
+  
+  transition: opacity 0.15s ease-in-out;
+  opacity: 1;
+}
+
+/* --- MAP MODE (Aqua Box) --- */
+
+/* When in map-mode, the CONTAINER gets the border */
+#flag-area.map-mode {
+  border: 5px solid cyan;
+  box-shadow: 0 0 10px cyan;
+}
+
+/* When in map-mode, the IMAGE loses its red border and gets inverted */
+#flag-area.map-mode #flag-img {
+  border: none;
+  box-shadow: none;
+  filter: invert(1) brightness(1.2);
+  background: transparent !important;
+}
+
+
+/* Loading / Hidden Helper */
+.loading-hidden {
+  opacity: 0 !important;
+}
+
+/* COUNTDOWN OVERLAY */
+#countdown-overlay {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-size: 6rem;
+  font-weight: 800;
+  color: #ffc107;
+  text-shadow: 0 0 20px rgba(0,0,0, 0.8);
+  z-index: 10;
+  pointer-events: none;
+}
+
+/* Hides broken image icons */
+img[src=""], img:not([src]) {
+  opacity: 0 !important;
+}
+
+
+/* GAME EXTRAS */
+#timer-wrapper { height: 6px; background: #333; border-radius: 3px; overflow: hidden; margin-top: 5px; }
+#timer-bar { height: 100%; background: #ffc107; width: 100%; }
+#feedback-ticker { min-height: 34px; display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 5px; margin: 10px 0; }
+.ticker-pill { padding: 6px 12px; border-radius: 15px; font-size: 0.9em; font-weight: bold; animation: popIn 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+.pill-good { background: #1e4025; color: #4cd964; border: 1px solid #28a745; }
+.pill-bad { background: #401e1e; color: #ff5c5c; border: 1px solid #d9534f; }
+.pill-answer { background: #ffc107; color: #000; font-size: 1.2em; padding: 8px 20px; border: 2px solid #e0a800; width: auto; box-shadow: 0 0 10px rgba(255, 193, 7, 0.4); }
+@keyframes popIn { from { transform: scale(0); } to { transform: scale(1); } }
+.input-correct { border: 2px solid #28a745 !important; background: #1e3a25 !important; color: #28a745 !important; }
+.input-wrong { border: 2px solid #d9534f !important; background: #3a1e1e !important; color: #d9534f !important; animation: shake 0.3s; }
+@keyframes shake { 0%, 100% {transform:translateX(0);} 25%, 75% {transform:translateX(-5px);} 50% {transform:translateX(5px);} }
+table { width: 100%; border-collapse: collapse; background: #222; border-radius: 8px; overflow: hidden; }
+th, td { padding: 12px; text-align: center; border-bottom: 1px solid #333; }
+th { background: #2a2a2a; color: #aaa; font-size: 0.9em; text-transform: uppercase; }
+.game-over-actions { display: flex; gap: 10px; margin-top: 15px; }
+
+@media (max-width: 600px) {
+  #flag-area { height: auto; min-height: 200px; } /* Adapt height on mobile */
+  #flag-img { width: auto; max-height: 250px; }
+  .screen { padding-top: 5px; }
+  #game-header { margin-bottom: 5px; }
+  #timer-wrapper { margin-top: 2px; }
+  #feedback-ticker { min-height: 24px; margin: 5px 0; }
+  input, button { padding: 12px; margin-bottom: 5px; }
+}

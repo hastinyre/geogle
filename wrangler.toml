@@ -1,0 +1,19 @@
+name = "geogle"
+main = "src/index.js"
+compatibility_date = "2024-11-25"
+account_id = "b61202fbaf3022d0121a2974a2b542cf"  # <--- ADD THIS LINE
+
+# 1. Durable Object Binding
+[[durable_objects.bindings]]
+name = "LOBBY"
+class_name = "GameLobby"
+
+# 2. Migrations (SQLite for Free Tier)
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["GameLobby"]
+
+# 3. Static Assets
+[assets]
+directory = "./public"
+binding = "ASSETS"
