@@ -2,6 +2,7 @@
 const socket3 = window.socket;
 let MY_SUBMITTED = false;
 let TIMER_INTERVAL = null;
+let CURRENT_PLAYER_COUNT = 1;
 
 function addTickerItem(username, isGood) {
   const container = document.getElementById("feedback-ticker");
@@ -26,6 +27,10 @@ socket3.on("gameStarting", () => {
   // Ensure default state (Remove map mode styles if any)
   const area = document.getElementById("flag-area");
   area.classList.remove("map-mode");
+
+  // Clear previous game results immediately so they don't show under countdown
+  document.getElementById("feedback-ticker").innerHTML = "";
+  document.getElementById("progress-indicator").innerText = "";
 
   // 2. Start Countdown
   const overlay = document.getElementById("countdown-overlay");
@@ -54,6 +59,7 @@ socket3.on("gamePreload", ({ url }) => {
 
 socket3.on("questionStart", ({ index, total, flagPath, timeLimit, playerCount, imageType }) => {
   MY_SUBMITTED = false;
+  CURRENT_PLAYER_COUNT = playerCount;
   
   document.getElementById("question-counter").innerText = `Q ${index} / ${total}`;
   
@@ -110,8 +116,11 @@ function submitGuess() {
   document.getElementById("answer-input").disabled = true;
   document.getElementById("answer-btn").disabled = true;
   
-  // Freeze Timer
-  clearInterval(TIMER_INTERVAL);
+  // Freeze Timer ONLY if single player.
+  // In multiplayer, keep it running so they can see how much time is left for others.
+  if (CURRENT_PLAYER_COUNT === 1) {
+    clearInterval(TIMER_INTERVAL);
+  }
   
   socket3.emit("submitAnswer", { answer: val });
 }
