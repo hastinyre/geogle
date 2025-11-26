@@ -51,8 +51,6 @@ const config = {
 export class GameLobby {
   constructor(state, env) {
     this.state = state;
-    // We use one giant object to hold ALL lobbies for now (Monolith style)
-    // In a future advanced version, we would split this up.
     this.lobbies = {}; 
     this.sessions = new Map(); // WebSocket -> { playerId, lobbyCode }
   }
@@ -89,15 +87,9 @@ export class GameLobby {
   }
 
   // --- CORE EVENT HANDLER ---
-
-// --- CORE EVENT HANDLER ---
   handleEvent(ws, playerId, event, payload) {
-    // 1. Look up the Lobby Code from the server's memory (The Session)
     const session = this.sessions.get(ws);
     const memoryLobbyCode = session ? session.lobbyCode : null;
-
-    // 2. Determine which code to use (Payload takes priority for setup, Memory for gameplay)
-    // Most events send payload.lobbyCode, but 'submitAnswer' DOES NOT.
     const code = (payload && payload.lobbyCode) ? payload.lobbyCode : memoryLobbyCode;
 
     switch (event) {
@@ -126,13 +118,33 @@ export class GameLobby {
         this.kickPlayer(code, playerId, payload.targetId);
         break;
       case "submitAnswer":
-        // FIXED: Now uses 'code' (from memory) instead of payload.lobbyCode
         this.submitAnswer(code, playerId, payload.answer, ws);
+        break;
+      case "voiceSignal":
+        // NEW: Forward WebRTC handshake signals
+        this.handleVoiceSignal(code, playerId, payload);
         break;
     }
   }
 
   // --- ACTIONS ---
+
+  handleVoiceSignal(code, senderId, payload) {
+    const lobby = this.lobbies[code];
+    if (!lobby) return;
+    const { targetId, signal } = payload;
+    
+    // Find target socket
+    for (const [ws, sess] of this.sessions.entries()) {
+      if (sess.lobbyCode === code && sess.playerId === targetId) {
+        ws.send(JSON.stringify({ 
+          event: "voiceSignal", 
+          payload: { senderId, signal } 
+        }));
+        break;
+      }
+    }
+  }
 
   createLobby(ws, playerId, payload) {
     const type = payload.type || 'private';
@@ -166,17 +178,12 @@ export class GameLobby {
 
   joinLobby(ws, playerId, payload) {
     const code = payload.lobbyCode;
-    if (!this.lobbies[code]) {
-      // Small mismatch handling for native socket wrapper
-      // Client might expect specific error event, we just log for now
-      return; 
-    }
+    if (!this.lobbies[code]) return; 
     this.joinLobbyInternal(ws, playerId, code, payload.username || "Guest");
     ws.send(JSON.stringify({ event: "initStats", payload: data.continentCounts }));
   }
 
   requestPublicGame(ws, playerId, payload) {
-    // Find existing public lobby
     const existing = Object.values(this.lobbies).find(l => 
       l.type === 'public' && !l.gameInProgress && Object.keys(l.players).length < 2
     );
@@ -184,10 +191,9 @@ export class GameLobby {
     if (existing) {
       this.joinLobbyInternal(ws, playerId, existing.code, payload.username || "Player 2");
       if (Object.keys(existing.players).length === 2) {
-        this.startGame(existing.code, existing.hostId, true); // Force start
+        this.startGame(existing.code, existing.hostId, true); 
       }
     } else {
-      // Create new
       this.createLobby(ws, playerId, { username: payload.username, type: 'public' });
     }
   }
@@ -196,7 +202,6 @@ export class GameLobby {
     const lobby = this.lobbies[code];
     if (!lobby) return;
 
-    // Update Session
     const sess = this.sessions.get(ws);
     if (sess) sess.lobbyCode = code;
 
@@ -221,7 +226,6 @@ export class GameLobby {
       delete this.lobbies[code];
     } else {
       if (lobby.hostId === playerId) {
-        // Assign new host
         lobby.hostId = Object.keys(lobby.players)[0];
       }
       this.broadcastToLobby(code, "lobbyUpdate", lobby);
@@ -253,10 +257,8 @@ export class GameLobby {
     lobby.gameInProgress = true;
     this.broadcastToLobby(code, "gameStarting", lobby.settings);
     
-    // Broadcast helper for the engine
     const broadcastFn = (evt, payload) => this.broadcastToLobby(code, evt, payload);
 
-    // Run the engine
     startGameEngine(broadcastFn, lobby, { config, data });
     this.broadcastLobbyList();
   }
@@ -265,7 +267,6 @@ export class GameLobby {
     const lobby = this.lobbies[code];
     if (lobby && lobby.currentAnswerHandler) {
       const isCorrect = lobby.currentAnswerHandler(playerId, answer);
-      // Send private result back to guesser
       ws.send(JSON.stringify({ event: "answerResult", payload: { correct: isCorrect } }));
     }
   }
@@ -273,18 +274,14 @@ export class GameLobby {
   kickPlayer(code, hostId, targetId) {
     const lobby = this.lobbies[code];
     if (lobby && lobby.hostId === hostId) {
-        // Find target socket
         for (const [ws, sess] of this.sessions.entries()) {
             if (sess.playerId === targetId) {
                 this.leaveLobby(ws, code, targetId);
-                // Optionally send a kicked message
                 break;
             }
         }
     }
   }
-
-  // --- HELPERS ---
 
   broadcastToLobby(code, event, payload) {
     const msg = JSON.stringify({ event, payload });
@@ -301,7 +298,6 @@ export class GameLobby {
       .map(l => ({ code: l.code, name: l.name, count: Object.keys(l.players).length }));
     
     const msg = JSON.stringify({ event: "lobbyList", payload: list });
-    // Broadcast to everyone NOT in a lobby (or everyone in general)
     for (const [ws, sess] of this.sessions.entries()) {
         try { ws.send(msg); } catch(e) {}
     }

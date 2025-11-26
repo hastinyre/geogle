@@ -160,6 +160,39 @@ th { background: #2a2a2a; color: #aaa; font-size: 0.9em; text-transform: upperca
   padding-right: 0;
 }
 
+/* VOICE CHAT OVERLAY */
+#voice-overlay {
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  z-index: 9999;
+  display: flex;
+  gap: 8px;
+}
+
+.voice-btn {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 18px;
+  line-height: 36px;
+  margin-bottom: 0;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.5);
+  background: #28a745; /* Green by default (On) */
+  color: white;
+  border: 1px solid rgba(255,255,255,0.2);
+}
+
+.voice-off {
+  background: #d9534f; /* Red (Muted/Off) */
+  opacity: 0.9;
+}
+
+.voice-btn:hover {
+  filter: brightness(1.1);
+}
+
 /* MOBILE OPTIMIZATION */
 @media (max-width: 600px) {
   /* 1. Tighten the container to save vertical space */
