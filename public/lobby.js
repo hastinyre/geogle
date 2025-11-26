@@ -45,25 +45,32 @@ function updateLobbyUI(lobby) {
   const statusText = document.getElementById("lobby-status-text");
   const codeSpan = document.getElementById("lobby-room-code");
 
+  // [HUD QUIT BUTTON] logic
+  const quitBtn = document.getElementById("hud-quit-btn");
   if (lobby.type === 'single') {
     title.innerText = "Single Player";
     statusText.innerText = "Practice Mode";
     codeSpan.innerText = "";
-  } else if (lobby.type === 'public') {
-    title.innerText = "Public Match";
-    if (Object.keys(lobby.players).length < 2) {
-      statusText.innerText = "Status:";
-      codeSpan.innerText = "Searching...";
-      codeSpan.style.fontSize = "1em";
-    } else {
-      statusText.innerText = "Status:";
-      codeSpan.innerText = "Match Found!";
-    }
+    quitBtn.classList.remove("hidden"); // Show Exit button
   } else {
-    title.innerText = lobby.name;
-    statusText.innerText = "Code:";
-    codeSpan.innerText = lobby.code;
-    codeSpan.style.fontSize = "1.4em";
+    quitBtn.classList.add("hidden"); // Hide in multiplayer
+    
+    if (lobby.type === 'public') {
+      title.innerText = "Public Match";
+      if (Object.keys(lobby.players).length < 2) {
+        statusText.innerText = "Status:";
+        codeSpan.innerText = "Searching...";
+        codeSpan.style.fontSize = "1em";
+      } else {
+        statusText.innerText = "Status:";
+        codeSpan.innerText = "Match Found!";
+      }
+    } else {
+      title.innerText = lobby.name;
+      statusText.innerText = "Code:";
+      codeSpan.innerText = lobby.code;
+      codeSpan.style.fontSize = "1.4em";
+    }
   }
 
   const container = document.getElementById("player-list-container");
@@ -165,32 +172,38 @@ socket2.on("lobbyCreated", (data) => {
 });
 socket2.on("initStats", (stats) => { CONTINENT_DATA = stats; });
 
-// [UPDATED] Auto-Rehydration & UI Logic
 socket2.on("lobbyUpdate", (lobby) => {
-  // 1. Rehydration Check: If we just reloaded, restore USERNAME
   if (!window.USERNAME && lobby.players && socket2.id && lobby.players[socket2.id]) {
     window.USERNAME = lobby.players[socket2.id].username;
   }
-
-  // 2. Navigation Logic:
-  // If we are getting an update, we should probably be seeing the lobby.
-  // Exception: If we are already playing (game-screen) or seeing results (game-over-screen), don't jump back.
+  
   const active = document.querySelector(".screen:not(.hidden)");
   if (!active || (active.id !== "game-screen" && active.id !== "game-over-screen")) {
     show("lobby-room");
   }
 
-  // 3. Normal UI Update
   updateLobbyUI(lobby);
 });
 
-// Kicked Listener
+// Kicked Listener (With Laptop Fix)
 socket2.on("kicked", () => {
   alert("You have been kicked from the lobby.");
   CURRENT_LOBBY = null;
-  window.USERNAME = ""; 
-  show("mode-screen"); 
+  // Don't clear username, keep it for convenience
+  show("mode-screen");
+  
+  // Fight browser autofill on laptops
+  const input = document.getElementById("join-code-input");
+  input.value = "";
+  setTimeout(() => { input.value = ""; }, 100);
 });
+
+// Quit Button Listener
+document.getElementById("hud-quit-btn").onclick = () => {
+  if (CURRENT_LOBBY) socket2.emit("leaveLobby", { lobbyCode: CURRENT_LOBBY.code });
+  CURRENT_LOBBY = null;
+  show("mode-screen");
+};
 
 
 document.getElementById("back-to-mode-btn").onclick = () => show("mode-screen");

@@ -1,6 +1,16 @@
 // public/client.js
 const socket = new NativeSocket();
 
+// 1. Recover Username from Storage
+let savedName = localStorage.getItem("geogle_username") || "";
+let USERNAME = savedName;
+window.USERNAME = USERNAME;
+
+function updateHUD() {
+  const hudName = document.getElementById("hud-username");
+  if (hudName) hudName.innerText = window.USERNAME || "";
+}
+
 function show(id) {
   document.querySelectorAll(".screen").forEach((s) => s.classList.add("hidden"));
   const el = document.getElementById(id);
@@ -15,9 +25,22 @@ function show(id) {
       voiceEl.classList.add("hidden");
     }
   }
+
+  // HUD Visibility
+  const hudEl = document.getElementById("hud-overlay");
+  if (id !== "username-screen") {
+    hudEl.classList.remove("hidden");
+    updateHUD();
+  } else {
+    hudEl.classList.add("hidden");
+  }
 }
 
-let USERNAME = "";
+if (USERNAME) {
+  show("mode-screen");
+} else {
+  show("username-screen");
+}
 
 // USERNAME
 document.getElementById("username-btn").onclick = () => {
@@ -25,6 +48,8 @@ document.getElementById("username-btn").onclick = () => {
   if (!name) return;
   USERNAME = name;
   window.USERNAME = USERNAME;
+  localStorage.setItem("geogle_username", USERNAME); 
+  updateHUD();
   show("mode-screen");
 };
 
@@ -44,11 +69,9 @@ document.getElementById("single-btn").onclick = () => {
 };
 
 window.socket = socket;
-window.USERNAME = USERNAME;
-
 
 // ============================================
-// VOICE CHAT LOGIC (Mesh P2P - Unified Plan)
+// VOICE CHAT LOGIC (Mesh P2P - Auto-Reattach)
 // ============================================
 
 const peers = {}; 
@@ -62,12 +85,27 @@ const iceServers = {
   iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
 };
 
+// --- Helper: Plug Mic into a Connection ---
+// This fixes the "Reload Glitch" by ensuring active mics are 
+// attached to new connections immediately.
+function reattachLocalStream(pc) {
+  if (localStream && isMicOn) {
+    const audioTrack = localStream.getAudioTracks()[0];
+    if (audioTrack) {
+      // Find the audio sender (whether silent or null) and plug the track in
+      const sender = pc.getSenders().find(s => s.track && s.track.kind === 'audio' || (!s.track));
+      if (sender) {
+        sender.replaceTrack(audioTrack).catch(e => console.error("Voice: Auto-Reattach Error", e));
+      }
+    }
+  }
+}
+
 // 1. Voice Controls
 const btnMic = document.getElementById("btn-mic");
 const btnSpeaker = document.getElementById("btn-speaker");
 
 btnMic.onclick = async () => {
-  // A. Request Mic Permissions
   if (!localStream) {
     try {
       console.log("Voice: Requesting Mic Access...");
@@ -79,7 +117,6 @@ btnMic.onclick = async () => {
     }
   }
 
-  // B. Toggle State
   isMicOn = !isMicOn;
   
   if (isMicOn) {
@@ -90,18 +127,11 @@ btnMic.onclick = async () => {
     btnMic.style.background = ""; 
   }
 
-  // C. Mute/Unmute Hardware
   const audioTrack = localStream.getAudioTracks()[0];
   if (audioTrack) audioTrack.enabled = isMicOn;
 
-  // D. Update Active Connections
-  Object.values(peers).forEach(pc => {
-    // Find the audio sender. It might be null track if currently silent.
-    const sender = pc.getSenders().find(s => s.track && s.track.kind === 'audio' || (!s.track));
-    if (sender) {
-      sender.replaceTrack(audioTrack).catch(e => console.error("Voice: Replace error", e));
-    }
-  });
+  // Update ALL connections
+  Object.values(peers).forEach(pc => reattachLocalStream(pc));
 };
 
 btnSpeaker.onclick = () => {
@@ -125,11 +155,10 @@ function createPeer(targetId, initiator) {
   const pc = new RTCPeerConnection(iceServers);
   iceQueues[targetId] = [];
 
-  // [CRITICAL FIX]: Only INITIATOR creates the Transceiver manually.
-  // The Responder will get one automatically when they receive the Offer.
-  // This prevents "Double Transceiver" / "Pipe Mismatch" bugs.
   if (initiator) {
     pc.addTransceiver('audio', { direction: 'sendrecv' });
+    // [FIX] If we initiated and our Mic is ON, plug it in NOW.
+    reattachLocalStream(pc);
   }
 
   pc.onicecandidate = (event) => {
@@ -193,16 +222,16 @@ socket.on("voiceSignal", async ({ senderId, signal }) => {
       console.log(`Voice: Received Offer from ${senderId}`);
       await pc.setRemoteDescription(new RTCSessionDescription(signal));
       
-      // [CRITICAL FIX FOR RESPONDER]
-      // We didn't add a transceiver manually. We must ensure the one created
-      // by the Offer is set to 'sendrecv' so we can reply with audio later.
+      // Ensure Transceiver direction if we are Responder
       pc.getTransceivers().forEach(t => {
         if (t.receiver.track.kind === 'audio') {
           t.direction = 'sendrecv';
         }
       });
 
-      // Process ICE
+      // [FIX] If we are Responding and Mic is ON, plug it in NOW.
+      reattachLocalStream(pc);
+
       if (iceQueues[senderId]) {
         for (const cand of iceQueues[senderId]) await pc.addIceCandidate(new RTCIceCandidate(cand));
         iceQueues[senderId] = [];
@@ -227,6 +256,32 @@ socket.on("voiceSignal", async ({ senderId, signal }) => {
   } catch(e) { console.error("Voice: Signal Error", e); }
 });
 
+// Handle Rejoined Players
+socket.on("playerRejoined", ({ playerId }) => {
+  const myId = socket.id; 
+  if (playerId === myId) return;
+
+  console.log(`Voice: Player ${playerId} rejoined. Resetting connection.`);
+  
+  if (peers[playerId]) {
+    peers[playerId].close();
+    delete peers[playerId];
+    delete iceQueues[playerId];
+    const el = document.getElementById(`audio-${playerId}`);
+    if (el) el.remove();
+  }
+
+  // Larger ID calls Smaller ID logic
+  if (myId && myId > playerId) {
+    console.log(`Voice: Re-initiating call to ${playerId}`);
+    const pc = createPeer(playerId, true);
+    pc.createOffer().then(offer => {
+      pc.setLocalDescription(offer);
+      socket.emit("voiceSignal", { targetId: playerId, signal: offer });
+    });
+  }
+});
+
 // 4. Lobby Updates
 socket.on("lobbyUpdate", (lobby) => {
   myPlayerId = socket.id; 
@@ -234,10 +289,8 @@ socket.on("lobbyUpdate", (lobby) => {
 
   const currentPlayers = Object.keys(lobby.players);
 
-  // Connect to new players
   currentPlayers.forEach(pid => {
     if (pid !== myPlayerId && !peers[pid]) {
-      // Mesh Rule: Larger ID calls Smaller ID
       if (myPlayerId > pid) {
         const pc = createPeer(pid, true);
         pc.createOffer().then(offer => {
@@ -249,7 +302,6 @@ socket.on("lobbyUpdate", (lobby) => {
     }
   });
 
-  // Cleanup
   Object.keys(peers).forEach(pid => {
     if (!lobby.players[pid]) {
       if (peers[pid]) peers[pid].close();

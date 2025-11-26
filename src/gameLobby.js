@@ -64,7 +64,7 @@ export class GameLobby {
     // 2. Check for Disconnect Recovery (Grace Period)
     if (this.disconnections.has(sessionId)) {
       const recovery = this.disconnections.get(sessionId);
-      clearTimeout(recovery.timer); // STOP the delete timer
+      clearTimeout(recovery.timer); 
       this.disconnections.delete(sessionId);
       
       this.sessions.set(ws, { 
@@ -73,7 +73,11 @@ export class GameLobby {
         lastSeen: Date.now() 
       });
       
-      console.log(`Recovered session: ${sessionId} in lobby ${recovery.lobbyCode}`);
+      console.log(`Recovered session: ${sessionId}`);
+
+      // [FIX]: Tell everyone else this player is back, so they reset P2P Voice
+      this.broadcastToLobby(recovery.lobbyCode, "playerRejoined", { playerId });
+
     } else {
       // Brand new connection
       this.sessions.set(ws, { 
@@ -107,7 +111,7 @@ export class GameLobby {
             payload: {
               ...lobby.gameState.currentQuestion,
               timeLimit: lobby.settings.timeLimit,
-              remainingTime: remaining, // [FIX] Timer sync
+              remainingTime: remaining,
               playerCount: Object.keys(lobby.players).length
             }
           }));
@@ -275,7 +279,6 @@ export class GameLobby {
     if (sess) sess.lobbyCode = null;
     
     // Clear any pending disconnect timer for this ID
-    // (In case this was called by Kick)
     const sessionId = sess ? sess.sessionId : playerId;
     if (this.disconnections.has(sessionId)) {
         clearTimeout(this.disconnections.get(sessionId).timer);
@@ -335,12 +338,9 @@ export class GameLobby {
   kickPlayer(code, hostId, targetId) {
     const lobby = this.lobbies[code];
     if (lobby && lobby.hostId === hostId) {
-        // Find socket
         for (const [ws, sess] of this.sessions.entries()) {
             if (sess.playerId === targetId) {
-                // 1. Notify Client
                 ws.send(JSON.stringify({ event: "kicked" }));
-                // 2. Force Leave (Bypass Grace Period)
                 this.leaveLobby(ws, code, targetId);
                 break;
             }
