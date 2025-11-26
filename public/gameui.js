@@ -4,6 +4,59 @@ let MY_SUBMITTED = false;
 let TIMER_INTERVAL = null;
 let CURRENT_PLAYER_COUNT = 1;
 
+// Client Prediction Data
+let CURRENT_TARGET = ""; 
+let CURRENT_SYNONYMS = [];
+
+// --- CLIENT SIDE FUZZY LOGIC ---
+function clean(str) {
+  if (!str || typeof str !== 'string') return "";
+  return str.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function levenshtein(a, b) {
+  if (!a) return b ? b.length : 0;
+  if (!b) return a ? a.length : 0;
+  const m = a.length;
+  const n = b.length;
+  const dp = Array(m + 1).fill(0).map(() => Array(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost);
+    }
+  }
+  return dp[m][n];
+}
+
+function checkLocalAnswer(input, targetRaw, synonyms) {
+  if (!input || !targetRaw) return false;
+  const inp = clean(input);
+  const tgt = clean(targetRaw);
+  
+  // 1. Direct Match
+  if (inp === tgt) return true;
+  
+  // 2. Synonym Match
+  if (Array.isArray(synonyms)) {
+    for (let s of synonyms) {
+      if (clean(s) === inp) return true;
+    }
+  }
+
+  // 3. Fuzzy Check
+  const dist = levenshtein(inp, tgt);
+  const maxLen = Math.max(inp.length, tgt.length);
+  const score = (1 - dist / maxLen) * 100;
+  
+  // Short names strict, long names loose
+  if (tgt.length <= 4) return score > 95;
+  return score >= 85; 
+}
+// -------------------------------
+
 function addTickerItem(username, isGood) {
   const container = document.getElementById("feedback-ticker");
   const pill = document.createElement("div");
@@ -19,20 +72,33 @@ function addTickerItem(username, isGood) {
 socket3.on("gameStarting", () => {
   show("game-screen");
   
-  // 1. Clean Slate
+  // --- GHOST CLEANUP (The Janitor) ---
+  
+  // 1. Clear Image
   const img = document.getElementById("flag-img");
   img.src = ""; 
   img.classList.add("loading-hidden");
   
-  // Ensure default state (Remove map mode styles if any)
+  // 2. Reset Mode
   const area = document.getElementById("flag-area");
   area.classList.remove("map-mode");
 
-  // Clear previous game results immediately so they don't show under countdown
+  // 3. Reset Ticker & Progress
   document.getElementById("feedback-ticker").innerHTML = "";
   document.getElementById("progress-indicator").innerText = "";
+  
+  // 4. Reset Timer Bar
+  document.getElementById("timer-bar").style.width = "100%";
+  
+  // 5. Reset Input Styling
+  const inp = document.getElementById("answer-input");
+  inp.value = "";
+  inp.className = ""; // Removes input-correct/wrong
+  
+  // 6. Reset Counter Text
+  document.getElementById("question-counter").innerText = "Get Ready!";
 
-  // 2. Start Countdown
+  // --- START COUNTDOWN ---
   const overlay = document.getElementById("countdown-overlay");
   overlay.classList.remove("hidden");
   
@@ -57,9 +123,13 @@ socket3.on("gamePreload", ({ url }) => {
   }
 });
 
-socket3.on("questionStart", ({ index, total, flagPath, timeLimit, playerCount, imageType }) => {
+socket3.on("questionStart", ({ index, total, flagPath, timeLimit, playerCount, imageType, target, synonyms }) => {
   MY_SUBMITTED = false;
   CURRENT_PLAYER_COUNT = playerCount;
+  
+  // Store Prediction Data
+  CURRENT_TARGET = target;
+  CURRENT_SYNONYMS = synonyms || [];
   
   document.getElementById("question-counter").innerText = `Q ${index} / ${total}`;
   
@@ -112,15 +182,28 @@ function submitGuess() {
   if (MY_SUBMITTED) return;
   const val = document.getElementById("answer-input").value.trim();
   if (!val) return;
+  
   MY_SUBMITTED = true;
   document.getElementById("answer-input").disabled = true;
   document.getElementById("answer-btn").disabled = true;
   
-  // Freeze Timer ONLY if single player.
-  // In multiplayer, keep it running so they can see how much time is left for others.
+  // Freeze Timer ONLY if single player
   if (CURRENT_PLAYER_COUNT === 1) {
     clearInterval(TIMER_INTERVAL);
   }
+
+  // --- CLIENT SIDE PREDICTION (Instant Binary Choice) ---
+  const isLikelyCorrect = checkLocalAnswer(val, CURRENT_TARGET, CURRENT_SYNONYMS);
+  const inp = document.getElementById("answer-input");
+  
+  if (isLikelyCorrect) {
+    inp.classList.add("input-correct");
+    addTickerItem(window.USERNAME || "You", true);
+  } else {
+    inp.classList.add("input-wrong");
+    addTickerItem(window.USERNAME || "You", false);
+  }
+  // -----------------------------------------------------
   
   socket3.emit("submitAnswer", { answer: val });
 }
@@ -132,13 +215,28 @@ document.getElementById("answer-input").onkeydown = (e) => {
 
 socket3.on("answerResult", ({ correct }) => {
   const inp = document.getElementById("answer-input");
-  if (correct) inp.classList.add("input-correct");
-  else inp.classList.add("input-wrong");
+  // Server is ultimate truth. If we made a mistake in local prediction (rare), correct it.
+  const hasCorrect = inp.classList.contains("input-correct");
+  const hasWrong = inp.classList.contains("input-wrong");
+
+  // If we haven't styled it yet (shouldn't happen) OR if server disagrees with local
+  if ((!hasCorrect && !hasWrong) || (correct && hasWrong) || (!correct && hasCorrect)) {
+      inp.classList.remove("input-correct", "input-wrong");
+      if (correct) inp.classList.add("input-correct");
+      else inp.classList.add("input-wrong");
+  }
 });
 
 socket3.on("playerUpdate", ({ username, isCorrect, answeredCount, totalPlayers }) => {
   document.getElementById("progress-indicator").innerText = `${answeredCount}/${totalPlayers} Answered`;
-  addTickerItem(username, isCorrect);
+  
+  // If we predicted our own result, don't show the ticker again
+  const myUsername = window.USERNAME || "You";
+  if (username === myUsername) {
+     // We already showed our ticker item instantly. Do nothing.
+  } else {
+     addTickerItem(username, isCorrect);
+  }
 });
 
 socket3.on("questionEnd", ({ correctCountry, preload }) => {

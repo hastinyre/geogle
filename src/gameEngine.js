@@ -52,13 +52,20 @@ function start(broadcast, lobby, { config, data }) {
     
     const imagePath = useMap ? `maps/${q.code}.svg` : (q.flag_4x3 || `flags/4x3/${q.code}.svg`);
 
+    // --- PREPARE CLIENT PREDICTION DATA ---
+    // Find all synonyms that point to this specific country name
+    // e.g. If q.name is "United States", find ["usa", "america", ...]
+    const relevantSynonyms = Object.keys(data.synonyms).filter(key => data.synonyms[key] === q.name);
+
     broadcast("questionStart", {
       index: currentIndex + 1,
       total: questions.length,
       flagPath: imagePath,
       imageType: useMap ? 'map' : 'flag',
       timeLimit: lobby.settings.timeLimit,
-      playerCount: Object.keys(lobby.players).length
+      playerCount: Object.keys(lobby.players).length,
+      target: q.name,          // For client prediction
+      synonyms: relevantSynonyms // For client prediction (to avoid false reds)
     });
 
     const startTime = Date.now();
@@ -134,7 +141,7 @@ function start(broadcast, lobby, { config, data }) {
     broadcast("lobbyUpdate", lobby);
   }
 
-  // --- CHANGED: PRELOAD QUESTION 1 ---
+  // --- PRELOAD QUESTION 1 ---
   if (questions.length > 0) {
     const firstQ = questions[0];
     const firstUseMap = determineQuestionType();
