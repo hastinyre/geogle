@@ -44,16 +44,16 @@ function updateLobbyUI(lobby) {
   const title = document.getElementById("lobby-room-title");
   const statusText = document.getElementById("lobby-status-text");
   const codeSpan = document.getElementById("lobby-room-code");
-
-  // [HUD QUIT BUTTON] logic
   const quitBtn = document.getElementById("hud-quit-btn");
+  
+  // Single Player Mode
   if (lobby.type === 'single') {
     title.innerText = "Single Player";
     statusText.innerText = "Practice Mode";
     codeSpan.innerText = "";
-    quitBtn.classList.remove("hidden"); // Show Exit button
+    quitBtn.classList.remove("hidden"); 
   } else {
-    quitBtn.classList.add("hidden"); // Hide in multiplayer
+    quitBtn.classList.add("hidden"); 
     
     if (lobby.type === 'public') {
       title.innerText = "Public Match";
@@ -73,8 +73,11 @@ function updateLobbyUI(lobby) {
     }
   }
 
+  // Player List
   const container = document.getElementById("player-list-container");
   container.innerHTML = "";
+  let allReady = true;
+
   if (lobby.players) {
     Object.values(lobby.players).forEach((p) => {
       const row = document.createElement("div");
@@ -86,6 +89,9 @@ function updateLobbyUI(lobby) {
       const statusDiv = document.createElement("div");
       if (lobby.type !== 'single' && lobby.type !== 'public') {
          const isReady = (p.id === lobby.hostId) || lobby.readyState[p.id];
+         // Logic for start button check
+         if (!isReady) allReady = false; 
+
          statusDiv.innerHTML = isReady ? "<span style='color:#28a745'>Ready</span>" : "<span style='color:#666'>...</span>";
       }
       
@@ -103,16 +109,45 @@ function updateLobbyUI(lobby) {
     });
   }
 
+  // Host Settings UI
   const showSettings = IS_HOST && (lobby.type === 'private' || lobby.type === 'single');
   document.getElementById("host-settings").classList.toggle("hidden", !showSettings);
 
-  if (showSettings && lobby.settings && lobby.settings.gameType) {
-    document.querySelectorAll(".seg-btn").forEach(btn => {
-      if (btn.value === lobby.settings.gameType) btn.classList.add("active");
-      else btn.classList.remove("active");
-    });
+  if (showSettings && lobby.settings) {
+    if (lobby.settings.gameType) {
+      document.querySelectorAll(".seg-btn").forEach(btn => {
+        if (btn.value === lobby.settings.gameType) btn.classList.add("active");
+        else btn.classList.remove("active");
+      });
+    }
+    // Update Checkbox State
+    document.getElementById("hints-chk").checked = !!lobby.settings.hints;
   }
 
+  // Start Button Logic (Strict Ready Check)
+  const startBtn = document.getElementById("start-game-btn");
+  const waitMsg = document.getElementById("wait-msg");
+
+  if (lobby.type === 'private' || lobby.type === 'public') {
+     // Check if we have enough players and if everyone is ready
+     const enoughPlayers = Object.keys(lobby.players).length >= 2;
+     const canStart = enoughPlayers && allReady;
+     
+     startBtn.disabled = !canStart;
+     if (!canStart) {
+         if (!enoughPlayers) waitMsg.innerText = "Need at least 2 players";
+         else waitMsg.innerText = "Waiting for players to ready up...";
+         waitMsg.classList.remove("hidden");
+     } else {
+         waitMsg.classList.add("hidden");
+     }
+  } else {
+     // Single player always ready
+     startBtn.disabled = false;
+     waitMsg.classList.add("hidden");
+  }
+
+  // Ready Button UI (Guest)
   const showReady = !IS_HOST && lobby.type === 'private';
   const readyBtn = document.getElementById("ready-btn");
   readyBtn.style.display = showReady ? "inline-block" : "none";
@@ -148,6 +183,12 @@ document.querySelectorAll(".cont-chk").forEach((chk) => {
     socket2.emit("updateLobbySettings", { lobbyCode: CURRENT_LOBBY.code, settings: { continents }});
   };
 });
+
+// New Listener for Hints Toggle
+document.getElementById("hints-chk").onchange = (e) => {
+    if (!IS_HOST) return;
+    socket2.emit("updateLobbySettings", { lobbyCode: CURRENT_LOBBY.code, settings: { hints: e.target.checked }});
+};
 
 document.getElementById("questions-input").oninput = (e) => {
   if (!IS_HOST) return;
@@ -185,20 +226,16 @@ socket2.on("lobbyUpdate", (lobby) => {
   updateLobbyUI(lobby);
 });
 
-// Kicked Listener (With Laptop Fix)
 socket2.on("kicked", () => {
   alert("You have been kicked from the lobby.");
   CURRENT_LOBBY = null;
-  // Don't clear username, keep it for convenience
   show("mode-screen");
   
-  // Fight browser autofill on laptops
   const input = document.getElementById("join-code-input");
   input.value = "";
   setTimeout(() => { input.value = ""; }, 100);
 });
 
-// Quit Button Listener
 document.getElementById("hud-quit-btn").onclick = () => {
   if (CURRENT_LOBBY) socket2.emit("leaveLobby", { lobbyCode: CURRENT_LOBBY.code });
   CURRENT_LOBBY = null;

@@ -49,7 +49,6 @@
     <h2>Join Lobby</h2>
     <div id="lobby-list"></div>
     <div class="join-controls">
-      <!-- Added autocomplete="off" to fight browser caching -->
       <input type="tel" id="join-code-input" maxlength="4" placeholder="Enter 4-Digit Code" autocomplete="off" />
       <button id="join-code-btn" class="action-btn">Join</button>
     </div>
@@ -84,6 +83,11 @@
         <label><input type="checkbox" class="cont-chk" value="South America"> S. Amer</label>
         <label><input type="checkbox" class="cont-chk" value="Oceania"> Oceania</label>
       </div>
+
+      <!-- NEW SETTING: SPELLING HINTS -->
+      <div class="setting-single">
+         <label><input type="checkbox" id="hints-chk" checked> Spelling Hints / Autocomplete</label>
+      </div>
       
       <div class="settings-row">
         <div class="input-wrapper">
@@ -100,6 +104,7 @@
       </div>
 
       <button id="start-game-btn" class="action-btn">Start Game</button>
+      <div id="wait-msg" class="hidden" style="color:#aaa; font-size:0.8rem; margin-top:5px;">Waiting for players to ready up...</div>
     </div>
 
     <div id="player-ready-area">
@@ -123,10 +128,17 @@
       
       <div id="feedback-ticker"></div>
       <div id="progress-indicator">Waiting...</div>
+      
+      <!-- UPDATED ANSWER AREA -->
       <div id="answer-area">
-        <input type="text" id="answer-input" placeholder="Guess the country..." autocomplete="off" />
+        <div class="autocomplete-wrapper">
+          <span id="ghost-overlay"></span>
+          <input type="text" id="answer-input" placeholder="Guess..." autocomplete="off" />
+          <button id="next-suggestion-btn" class="hidden">Next</button>
+        </div>
         <button id="answer-btn">Submit</button>
       </div>
+
     </div>
   </div>
 

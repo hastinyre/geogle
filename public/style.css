@@ -12,6 +12,7 @@ button { background: #333; color: white; font-weight: 600; cursor: pointer; tran
 button:active { transform: scale(0.98); }
 .action-btn { background: #28a745; }
 .action-btn:hover { background: #218838; }
+.action-btn:disabled { background: #555; cursor: not-allowed; opacity: 0.7; }
 .secondary-btn { background: #444; }
 .secondary-btn:hover { background: #555; }
 
@@ -33,6 +34,7 @@ button:active { transform: scale(0.98); }
 .max-btn.active { background: #007acc; color: white; }
 .chk-group { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; text-align: left; margin-bottom: 15px; }
 .chk-group label { display: block; font-size: 0.9em; background: #222; padding: 8px; border-radius: 4px; }
+.setting-single { text-align: left; margin-bottom: 15px; background: #222; padding: 10px; border-radius: 4px; border: 1px solid #444; font-size: 0.9em; }
 
 /* LOBBY ITEM */
 .lobby-item { background: #1f1f1f; border: 1px solid #333; padding: 15px; margin-bottom: 10px; border-radius: 8px; text-align: left; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
@@ -49,48 +51,35 @@ button:active { transform: scale(0.98); }
 /* GAME UI STRUCTURE */
 
 #flag-area {
-  /* The Stage (Container) */
   height: 220px;
   background: #000;
   border-radius: 8px;
-  /* Flexbox to center the image content */
   display: flex;
   justify-content: center;
   align-items: center;
   position: relative;
   overflow: hidden;
-  padding: 5px; /* Adds breathing room so borders don't get cut */
-  
-  /* DEFAULT STATE (Flags): No border on the box */
+  padding: 5px; 
   border: none; 
 }
 
 #flag-img {
-  /* The Actor (Image) */
-  /* Remove fixed sizes so it respects aspect ratio */
   max-width: 100%;
   max-height: 100%;
   width: auto;
   height: auto;
   object-fit: contain;
-
-  /* FLAG MODE (Default): Red border hugs the image */
   border: 5px solid #b71c1c;
   box-shadow: 0 0 10px rgba(183, 28, 28, 0.3);
-  
   transition: opacity 0.15s ease-in-out;
   opacity: 1;
 }
 
-/* --- MAP MODE (Aqua Box) --- */
-
-/* When in map-mode, the CONTAINER gets the border */
 #flag-area.map-mode {
   border: 5px solid cyan;
   box-shadow: 0 0 10px cyan;
 }
 
-/* When in map-mode, the IMAGE loses its red border and gets inverted */
 #flag-area.map-mode #flag-img {
   border: none;
   box-shadow: none;
@@ -98,12 +87,8 @@ button:active { transform: scale(0.98); }
   background: transparent !important;
 }
 
-/* Loading / Hidden Helper */
-.loading-hidden {
-  opacity: 0 !important;
-}
+.loading-hidden { opacity: 0 !important; }
 
-/* COUNTDOWN OVERLAY */
 #countdown-overlay {
   position: absolute;
   top: 0; left: 0; right: 0; bottom: 0;
@@ -118,10 +103,7 @@ button:active { transform: scale(0.98); }
   pointer-events: none;
 }
 
-/* Hides broken image icons */
-img[src=""], img:not([src]) {
-  opacity: 0 !important;
-}
+img[src=""], img:not([src]) { opacity: 0 !important; }
 
 /* GAME EXTRAS */
 #timer-wrapper { height: 6px; background: #333; border-radius: 3px; overflow: hidden; margin-top: 5px; }
@@ -140,24 +122,72 @@ th, td { padding: 12px; text-align: center; border-bottom: 1px solid #333; }
 th { background: #2a2a2a; color: #aaa; font-size: 0.9em; text-transform: uppercase; }
 .game-over-actions { display: flex; gap: 10px; margin-top: 15px; }
 
-/* SIDE-BY-SIDE INPUT LAYOUT */
+/* AUTOCOMPLETE & INPUT AREA */
 #answer-area {
   display: flex;
   gap: 8px;
   width: 100%;
 }
-#answer-input {
-  flex: 3; /* Occupies ~75% */
-  margin-bottom: 0;
-  text-align: left; /* As requested */
-  padding-left: 15px;
+
+.autocomplete-wrapper {
+  position: relative;
+  flex: 3;
+  display: flex;
+  background: #2c2c2c;
+  border-radius: 8px;
+  border: 1px solid #444;
 }
-#answer-btn {
-  flex: 1; /* Occupies ~25% */
+
+.autocomplete-wrapper:focus-within {
+  border-color: #007acc;
+  background: #333;
+}
+
+#answer-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  z-index: 2;
+  position: relative;
   margin-bottom: 0;
-  min-width: 80px; /* Ensure text fits */
-  padding-left: 0;
-  padding-right: 0;
+  padding-left: 15px;
+  text-align: left;
+}
+#answer-input:focus { background: transparent; }
+
+#ghost-overlay {
+  position: absolute;
+  top: 0; left: 0; bottom: 0; right: 40px; /* Room for button */
+  display: flex;
+  align-items: center;
+  padding-left: 15px; /* Match input padding */
+  font-size: 16px; /* Match input font */
+  color: #666; /* Ghost Color */
+  pointer-events: none;
+  z-index: 1;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+#next-suggestion-btn {
+  position: absolute;
+  right: 5px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 3;
+  width: auto;
+  padding: 4px 8px;
+  font-size: 0.8rem;
+  margin-bottom: 0;
+  background: #444;
+  border-radius: 4px;
+}
+#next-suggestion-btn:hover { background: #555; }
+
+#answer-btn {
+  flex: 1; 
+  margin-bottom: 0;
+  min-width: 80px; 
 }
 
 /* VOICE CHAT OVERLAY */
@@ -179,21 +209,19 @@ th { background: #2a2a2a; color: #aaa; font-size: 0.9em; text-transform: upperca
   line-height: 36px;
   margin-bottom: 0;
   box-shadow: 0 2px 5px rgba(0,0,0,0.5);
-  background: #28a745; /* Green by default (On) */
+  background: #28a745; 
   color: white;
   border: 1px solid rgba(255,255,255,0.2);
 }
 
 .voice-off {
-  background: #d9534f; /* Red (Muted/Off) */
+  background: #d9534f; 
   opacity: 0.9;
 }
 
-.voice-btn:hover {
-  filter: brightness(1.1);
-}
+.voice-btn:hover { filter: brightness(1.1); }
 
-/* HUD OVERLAY (Top Right) */
+/* HUD OVERLAY */
 #hud-overlay {
   position: fixed;
   top: 10px;
@@ -225,42 +253,10 @@ th { background: #2a2a2a; color: #aaa; font-size: 0.9em; text-transform: upperca
 
 /* MOBILE OPTIMIZATION */
 @media (max-width: 600px) {
-  /* 1. Tighten the container to save vertical space */
-  #flag-area { 
-    height: auto; 
-    min-height: 160px;
-    padding: 10px;
-  } 
-
-  /* 2. Cap the image height strictly */
-  #flag-img { 
-    width: auto; 
-    max-height: 180px; 
-    max-width: 85%;
-  }
-
-  /* 3. Compact the Layout */
-  .screen { 
-    padding-top: 10px;
-    display: flex;
-    flex-direction: column;
-    justify-content: flex-start;
-    min-height: 100vh;
-  }
-
-  #game-header { 
-    margin-bottom: 5px; 
-    flex-shrink: 0;
-  }
-
-  /* 4. Ensure Input area is compacted */
-  #answer-area {
-    margin-top: 10px;
-    margin-bottom: 10px;
-  }
-  
-  /* Prevent iOS Zoom on focus */
-  input, button { 
-    font-size: 16px; 
-  }
+  #flag-area { height: auto; min-height: 160px; padding: 10px; } 
+  #flag-img { width: auto; max-height: 180px; max-width: 85%; }
+  .screen { padding-top: 10px; display: flex; flex-direction: column; justify-content: flex-start; min-height: 100vh; }
+  #game-header { margin-bottom: 5px; flex-shrink: 0; }
+  #answer-area { margin-top: 10px; margin-bottom: 10px; }
+  input, button { font-size: 16px; }
 }

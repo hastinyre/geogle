@@ -6,6 +6,7 @@ import lobbyNamesRaw from "./data/lobbyNames.json";
 const data = {
   countries: {},
   synonyms: {},
+  simpleCountryList: [], // Optimized list for client autocomplete
   continentCounts: { "all": 0 }
 };
 
@@ -24,6 +25,7 @@ function normalize(str) {
     data.continentCounts[cont] = (data.continentCounts[cont] || 0) + 1;
     data.continentCounts["all"]++;
     data.countries[c.code] = { ...c, displayName: c.name, normalizedName: normName, tokens: tokens };
+    data.simpleCountryList.push(c.name);
   });
 })();
 
@@ -37,10 +39,9 @@ export class GameLobby {
   constructor(state, env) {
     this.state = state;
     this.lobbies = {}; 
-    this.sessions = new Map(); // WS -> { playerId, sessionId, lobbyCode, lastSeen }
-    this.disconnections = new Map(); // sessionId -> { timer, lobbyCode }
+    this.sessions = new Map(); 
+    this.disconnections = new Map(); 
     
-    // Heartbeat: Check for dead connections every 10s
     setInterval(() => this.cleanupZombies(), 10000);
   }
 
@@ -57,11 +58,9 @@ export class GameLobby {
   handleSession(ws, existingSessionId) {
     ws.accept();
     
-    // 1. Resolve Identity
     const playerId = existingSessionId || crypto.randomUUID().slice(0, 8);
     const sessionId = playerId; 
 
-    // 2. Check for Disconnect Recovery (Grace Period)
     if (this.disconnections.has(sessionId)) {
       const recovery = this.disconnections.get(sessionId);
       clearTimeout(recovery.timer); 
@@ -73,13 +72,9 @@ export class GameLobby {
         lastSeen: Date.now() 
       });
       
-      console.log(`Recovered session: ${sessionId}`);
-
-      // [FIX]: Tell everyone else this player is back, so they reset P2P Voice
       this.broadcastToLobby(recovery.lobbyCode, "playerRejoined", { playerId });
 
     } else {
-      // Brand new connection
       this.sessions.set(ws, { 
         playerId, sessionId, 
         lobbyCode: null, 
@@ -87,21 +82,26 @@ export class GameLobby {
       });
     }
 
-    // 3. Send Init & Discovery Snapshot
     ws.send(JSON.stringify({ event: "init", id: playerId, sessionId }));
+    
+    // SEND STATIC DATA FOR AUTOCOMPLETE
+    ws.send(JSON.stringify({ 
+      event: "staticData", 
+      payload: { 
+        countries: data.simpleCountryList,
+        synonyms: synonymsRaw // Send raw map for client logic
+      } 
+    }));
     
     const list = this.getLobbyListPayload();
     ws.send(JSON.stringify({ event: "lobbyList", payload: list }));
 
-    // 4. State Rehydration (If recovering)
     const sess = this.sessions.get(ws);
     if (sess.lobbyCode) {
       const lobby = this.lobbies[sess.lobbyCode];
       if (lobby) {
-        // A. Send Lobby State
         ws.send(JSON.stringify({ event: "lobbyUpdate", payload: lobby }));
         
-        // B. Send Game State (If active)
         if (lobby.gameInProgress && lobby.gameState && lobby.gameState.isRoundActive) {
           const elapsed = (Date.now() - lobby.gameState.startTime) / 1000;
           const remaining = Math.max(0, lobby.settings.timeLimit - elapsed);
@@ -129,16 +129,14 @@ export class GameLobby {
       } catch (e) { console.error(e); }
     });
 
-    // 5. Graceful Disconnect Handler
     ws.addEventListener("close", () => {
       const s = this.sessions.get(ws);
       if (s) {
-        // Don't leave immediately. Start 5s timer.
         if (s.lobbyCode) {
            const timer = setTimeout(() => {
              this.leaveLobby(ws, s.lobbyCode, s.playerId);
              this.disconnections.delete(s.sessionId);
-           }, 5000); // 5 Seconds Grace
+           }, 5000); 
            
            this.disconnections.set(s.sessionId, { 
              timer, 
@@ -178,7 +176,6 @@ export class GameLobby {
 
   handleEvent(ws, playerId, event, payload) {
     const session = this.sessions.get(ws);
-    // Use session memory if payload missing (prevents hacking)
     const code = (payload && payload.lobbyCode) ? payload.lobbyCode : (session ? session.lobbyCode : null);
 
     switch (event) {
@@ -219,7 +216,13 @@ export class GameLobby {
       players: {},
       readyState: {},
       gameInProgress: false,
-      settings: { continents: [], questions: 10, timeLimit: 10, gameType: 'mixed' }
+      settings: { 
+        continents: [], 
+        questions: 10, 
+        timeLimit: 10, 
+        gameType: 'mixed',
+        hints: true // Default ON
+      }
     };
 
     this.joinLobbyInternal(ws, playerId, code, payload.username || "Host");
@@ -256,7 +259,6 @@ export class GameLobby {
     const sess = this.sessions.get(ws);
     if (sess) sess.lobbyCode = code;
 
-    // Check if player already exists (reconnection), if so keep their data/username
     if (!lobby.players[playerId]) {
       lobby.players[playerId] = { id: playerId, username };
       lobby.readyState[playerId] = false;
@@ -270,15 +272,12 @@ export class GameLobby {
     const lobby = this.lobbies[code];
     if (!lobby) return;
 
-    // Remove from lobby data
     delete lobby.players[playerId];
     delete lobby.readyState[playerId];
     
-    // Clear session ref
     const sess = this.sessions.get(ws);
     if (sess) sess.lobbyCode = null;
     
-    // Clear any pending disconnect timer for this ID
     const sessionId = sess ? sess.sessionId : playerId;
     if (this.disconnections.has(sessionId)) {
         clearTimeout(this.disconnections.get(sessionId).timer);
@@ -315,12 +314,27 @@ export class GameLobby {
     if (!lobby) return;
     if (!force && lobby.hostId !== playerId) return;
 
+    // STRICT READY CHECK
+    // In Public or Private lobbies, all non-host players must be ready.
+    // If it's a single player game, we ignore this.
+    if (lobby.type === 'private' || lobby.type === 'public') {
+      const allReady = Object.keys(lobby.players).every(pid => {
+        // Host is implicitly ready by clicking start, everyone else must be checked
+        return (pid === lobby.hostId) || lobby.readyState[pid];
+      });
+
+      if (!allReady) {
+        // Optionally send a warning to the host, but the UI handles disabled button.
+        return; 
+      }
+    }
+
     lobby.gameInProgress = true;
     this.broadcastToLobby(code, "gameStarting", lobby.settings);
     
     const broadcastFn = (evt, payload) => {
       this.broadcastToLobby(code, evt, payload);
-      if (evt === "gameOver") this.broadcastLobbyList(); // Re-list lobby
+      if (evt === "gameOver") this.broadcastLobbyList();
     };
 
     startGameEngine(broadcastFn, lobby, { config, data });
