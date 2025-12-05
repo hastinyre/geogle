@@ -1,16 +1,16 @@
 import { start as startGameEngine } from "./gameEngine.js";
 import countriesRaw from "./data/country.json";
 import synonymsRaw from "./data/synonyms.json";
-import languagesRaw from "./data/languages.json"; // [NEW]
+import languagesRaw from "./data/languages.json";
 import lobbyNamesRaw from "./data/lobbyNames.json";
 
 const data = {
   countries: {},
-  languages: {}, // [NEW]
+  languages: {},
   synonyms: {},
   simpleCountryList: [], 
-  simpleCapitalList: [], // [NEW]
-  simpleLanguageList: [], // [NEW]
+  simpleCapitalList: [], 
+  simpleLanguageList: [], 
   continentCounts: { "all": 0 }
 };
 
@@ -19,12 +19,9 @@ function normalize(str) {
 }
 
 (function initData() {
-  // 1. Synonyms
   for (const [key, val] of Object.entries(synonymsRaw)) {
     data.synonyms[normalize(key)] = val;
   }
-
-  // 2. Countries & Capitals
   countriesRaw.forEach(c => {
     const normName = normalize(c.name);
     const tokens = normName.split(" ").filter(Boolean);
@@ -37,11 +34,9 @@ function normalize(str) {
     data.simpleCountryList.push(c.name);
     
     if (c.capital) {
-      data.simpleCapitalList.push(c.capital); // [NEW] Extract Capital
+      data.simpleCapitalList.push(c.capital);
     }
   });
-
-  // 3. Languages [NEW]
   languagesRaw.forEach(l => {
     data.languages[l.id] = l;
     data.simpleLanguageList.push(l.name);
@@ -103,13 +98,12 @@ export class GameLobby {
 
     ws.send(JSON.stringify({ event: "init", id: playerId, sessionId }));
     
-    // [UPDATED] SEND STATIC DATA (Now includes Capitals and Languages)
     ws.send(JSON.stringify({ 
       event: "staticData", 
       payload: { 
         countries: data.simpleCountryList,
-        capitals: data.simpleCapitalList, // [NEW]
-        languages: data.simpleLanguageList, // [NEW]
+        capitals: data.simpleCapitalList,
+        languages: data.simpleLanguageList,
         synonyms: synonymsRaw 
       } 
     }));
@@ -122,21 +116,6 @@ export class GameLobby {
       const lobby = this.lobbies[sess.lobbyCode];
       if (lobby) {
         ws.send(JSON.stringify({ event: "lobbyUpdate", payload: lobby }));
-        
-        if (lobby.gameInProgress && lobby.gameState && lobby.gameState.isRoundActive) {
-          const elapsed = (Date.now() - lobby.gameState.startTime) / 1000;
-          const remaining = Math.max(0, lobby.settings.timeLimit - elapsed);
-          
-          ws.send(JSON.stringify({ 
-            event: "questionStart", 
-            payload: {
-              ...lobby.gameState.currentQuestion,
-              timeLimit: lobby.settings.timeLimit,
-              remainingTime: remaining,
-              playerCount: Object.keys(lobby.players).length
-            }
-          }));
-        }
       }
     }
 
@@ -208,7 +187,8 @@ export class GameLobby {
       case "updateLobbySettings": this.updateSettings(code, playerId, payload.settings); break;
       case "startGame": this.startGame(code, playerId); break;
       case "kickPlayer": this.kickPlayer(code, playerId, payload.targetId); break;
-      case "submitAnswer": this.submitAnswer(code, playerId, payload.answer, ws); break;
+      case "submitScore": this.submitScore(code, playerId, payload); break;
+      case "playerFinished": this.playerFinished(code, playerId); break;
       case "voiceSignal": this.handleVoiceSignal(code, playerId, payload); break;
     }
   }
@@ -241,7 +221,7 @@ export class GameLobby {
         continents: [], 
         questions: 10, 
         timeLimit: 10, 
-        gameType: 'mixed', // This will now cover Flags/Shapes/Capitals/Languages
+        gameType: 'mixed',
         hints: true 
       }
     };
@@ -339,10 +319,7 @@ export class GameLobby {
       const allReady = Object.keys(lobby.players).every(pid => {
         return (pid === lobby.hostId) || lobby.readyState[pid];
       });
-
-      if (!allReady) {
-        return; 
-      }
+      if (!allReady) return; 
     }
 
     lobby.gameInProgress = true;
@@ -357,11 +334,17 @@ export class GameLobby {
     this.broadcastLobbyList();
   }
 
-  submitAnswer(code, playerId, answer, ws) {
+  submitScore(code, playerId, payload) {
     const lobby = this.lobbies[code];
-    if (lobby && lobby.currentAnswerHandler) {
-      const isCorrect = lobby.currentAnswerHandler(playerId, answer);
-      ws.send(JSON.stringify({ event: "answerResult", payload: { correct: isCorrect } }));
+    if (lobby && lobby.scoreHandler) {
+      lobby.scoreHandler(playerId, payload);
+    }
+  }
+
+  playerFinished(code, playerId) {
+    const lobby = this.lobbies[code];
+    if (lobby && lobby.finishHandler) {
+      lobby.finishHandler(playerId);
     }
   }
 

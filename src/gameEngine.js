@@ -14,13 +14,11 @@ function generateRoundList(settings, data) {
   const count = settings.questions || 10;
   
   // 1. Prepare Pools
-  // Pool A: Countries (Filtered by Continent)
   const countryList = Object.values(data.countries);
   const filteredCountries = (settings.continents && settings.continents.length > 0)
       ? countryList.filter((c) => settings.continents.includes(c.continent))
       : countryList;
   
-  // Pool B: Languages (Global)
   const languageList = Object.values(data.languages || {});
 
   // Shuffle pools once
@@ -32,7 +30,7 @@ function generateRoundList(settings, data) {
 
   for (let i = 0; i < count; i++) {
     // 2. Determine Type
-    let type = 'flag'; // Default
+    let type = 'flag'; 
     const mode = settings.gameType || 'mixed';
 
     if (mode === 'flags') type = 'flag';
@@ -40,7 +38,7 @@ function generateRoundList(settings, data) {
     else if (mode === 'capitals') type = 'capital';
     else if (mode === 'languages') type = 'language';
     else {
-      // Mixed Mode: 25% chance each
+      // Mixed Mode
       const roll = Math.random();
       if (roll < 0.25) type = 'flag';
       else if (roll < 0.50) type = 'map';
@@ -48,9 +46,9 @@ function generateRoundList(settings, data) {
       else type = 'language';
     }
 
-    // 3. Pick Data based on Type
+    // 3. Pick Data
     if (type === 'language') {
-      if (languageList.length === 0) { type = 'flag'; } // Fallback
+      if (languageList.length === 0) { type = 'flag'; }
       else {
         const item = languageList[lIndex % languageList.length];
         lIndex++;
@@ -59,12 +57,10 @@ function generateRoundList(settings, data) {
       }
     }
 
-    // Flag/Map/Capital
-    if (filteredCountries.length === 0) break; // Emergency exit
+    if (filteredCountries.length === 0) break;
     const item = filteredCountries[cIndex % filteredCountries.length];
     cIndex++;
     
-    // Skip Capitals if data missing
     if (type === 'capital' && !item.capital) type = 'flag';
 
     rounds.push({ type, item });
@@ -75,39 +71,38 @@ function generateRoundList(settings, data) {
 
 function start(broadcast, lobby, { config, data }) {
   const players = lobby.players || {};
+  const playerCount = Object.keys(players).length;
+  const isMultiplayer = playerCount > 1;
+
   const gameStats = {};
   Object.keys(players).forEach(pid => {
     gameStats[pid] = { points: 0, totalTime: 0, username: players[pid].username || "Guest" };
   });
 
   const rounds = generateRoundList(lobby.settings, data);
-  let currentIndex = 0;
-  let currentTimer = null;
-  let isRoundActive = false;
-
+  
   // Initialize Game State
   lobby.gameState = {
     active: true,
-    questionIndex: 0,
-    totalQuestions: rounds.length,
-    currentQuestion: null,
-    startTime: 0,
-    timeLimit: lobby.settings.timeLimit
+    startTime: Date.now(),
+    timeLimit: lobby.settings.timeLimit,
+    currentRoundIndex: 0,
+    finishedPlayers: new Set() // For Multiplayer Sync
   };
 
-  // Helper to construct round payload
-  function getRoundPayload(roundObj) {
-    const { type, item } = roundObj;
+  // 1. Build Manifest
+  const manifest = rounds.map((round, index) => {
+    const { type, item } = round;
     let payload = {
+      index: index + 1,
       imageType: type,
-      flagPath: null, // Default null for Capital
+      flagPath: null,
       target: "",
       synonyms: [],
-      questionText: "" // New field
+      questionText: "" 
     };
 
     if (type === 'language') {
-      // Pick random image 1-3
       const num = Math.floor(Math.random() * 3) + 1;
       payload.flagPath = `languages/${item.id}_${num}.png`;
       payload.target = item.name;
@@ -116,116 +111,120 @@ function start(broadcast, lobby, { config, data }) {
     } else if (type === 'capital') {
       payload.target = item.capital;
       payload.questionText = `What is the capital of ${item.name}?`;
-      // No synonyms for capitals in this version, or strict match
       payload.synonyms = []; 
     } else {
-      // Flag or Map
       payload.flagPath = (type === 'map') 
         ? `maps/${item.code}.svg` 
         : (item.flag_4x3 || `flags/4x3/${item.code}.svg`);
       
       payload.target = item.name;
-      
-      // Filter synonyms for this specific country from the big map
       const relevant = Object.keys(data.synonyms).filter(k => data.synonyms[k] === item.name);
       payload.synonyms = relevant;
       payload.questionText = "Guess the Country";
     }
-
     return payload;
+  });
+
+  // 2. Broadcast Manifest
+  broadcast("gameManifest", {
+    questions: manifest,
+    timeLimit: lobby.settings.timeLimit,
+    totalQuestions: rounds.length,
+    isMultiplayer: isMultiplayer
+  });
+
+  // 3. Score Handler (Trusted Client Logic)
+  lobby.scoreHandler = (pid, { questionIndex, timeTaken }) => {
+    if (!gameStats[pid]) return;
+    // Basic de-duplication could go here if needed
+    gameStats[pid].points += 1;
+    gameStats[pid].totalTime += timeTaken;
+
+    broadcast("playerUpdate", {
+      username: gameStats[pid].username,
+      isCorrect: true,
+      totalPlayers: playerCount
+    });
+  };
+
+  // --- MULTIPLAYER SYNCHRONIZATION LOGIC ---
+
+  let roundTimer = null;
+
+  function endMultiplayerRound() {
+    clearTimeout(roundTimer);
+    const rIdx = lobby.gameState.currentRoundIndex;
+    const currentQuestion = manifest[rIdx];
+    
+    // Broadcast Round End (Clears toasts, shows answer)
+    broadcast("roundEnd", {
+      correctTarget: currentQuestion.target
+    });
+
+    // Intermission (2s) -> Next Round
+    setTimeout(() => {
+      if (!lobby.gameInProgress) return;
+      lobby.gameState.currentRoundIndex++;
+      startMultiplayerRound();
+    }, 2000);
   }
 
-  function sendQuestion() {
-    if (currentIndex >= rounds.length) {
+  function startMultiplayerRound() {
+    if (lobby.gameState.currentRoundIndex >= rounds.length) {
       endGame();
       return;
     }
 
-    const round = rounds[currentIndex];
-    const answersThisRound = new Set(); 
-    isRoundActive = true;
-
-    const payload = getRoundPayload(round);
-
-    // [SNAPSHOT] Update Lobby State
-    lobby.gameState.currentQuestion = {
-      index: currentIndex + 1,
-      total: rounds.length,
-      ...payload
-    };
-    lobby.gameState.startTime = Date.now();
-    lobby.gameState.isRoundActive = true;
-
-    broadcast("questionStart", {
-      ...lobby.gameState.currentQuestion,
-      timeLimit: lobby.settings.timeLimit,
-      playerCount: Object.keys(lobby.players).length
+    lobby.gameState.finishedPlayers.clear();
+    
+    // Signal clients to start their local engines
+    broadcast("roundStart", {
+      roundIndex: lobby.gameState.currentRoundIndex
     });
 
-    const startTime = Date.now();
+    // Server side safety timer (Time Limit + 1s buffer)
+    roundTimer = setTimeout(() => {
+      endMultiplayerRound();
+    }, (lobby.settings.timeLimit + 1) * 1000);
+  }
 
-    function finishQuestion() {
-      if (!isRoundActive) return;
-      isRoundActive = false;
-      lobby.gameState.isRoundActive = false;
-      
-      clearTimeout(currentTimer);
-
-      let preloadData = null;
-      if (currentIndex + 1 < rounds.length) {
-        const nextRound = rounds[currentIndex + 1];
-        const nextPayload = getRoundPayload(nextRound);
-        // Only preload if there is an image (Flag/Map/Language)
-        if (nextPayload.flagPath) {
-           preloadData = { url: nextPayload.flagPath };
-        }
-      }
-
-      broadcast("questionEnd", { 
-        correctCountry: payload.target, // Reusing field name for compatibility
-        preload: preloadData 
-      });
-
-      currentIndex++;
-      setTimeout(() => { if (lobby.gameInProgress) sendQuestion(); }, 2000);
+  // Handle "I'm Done" signal
+  lobby.finishHandler = (pid) => {
+    if (!lobby.gameInProgress) return;
+    
+    // Single Player: Ending Logic handled by client triggering 'playerFinished' at end of manifest
+    if (!isMultiplayer) {
+       endGame();
+       return;
     }
 
-    lobby.currentAnswerHandler = (pid, answer) => {
-        if (!isRoundActive) return false;
-        if (answersThisRound.has(pid)) return false;
+    // Multiplayer: Checkpoint Logic
+    lobby.gameState.finishedPlayers.add(pid);
+    if (lobby.gameState.finishedPlayers.size >= playerCount) {
+      // Everyone finished this round? End it immediately.
+      endMultiplayerRound();
+    }
+  };
 
-        const timeTaken = Date.now() - startTime;
-        
-        // Pass specific target string to fuzzy
-        const isCorrect = evaluateAnswer(answer, payload.target, payload.synonyms, config);
+  // --- START LOGIC ---
 
-        answersThisRound.add(pid);
-        if (isCorrect) {
-          gameStats[pid].points += 1;
-          gameStats[pid].totalTime += timeTaken;
-        }
-
-        broadcast("playerUpdate", {
-          username: gameStats[pid].username,
-          isCorrect: isCorrect,
-          answeredCount: answersThisRound.size,
-          totalPlayers: Object.keys(lobby.players).length
-        });
-        
-        if (answersThisRound.size >= Object.keys(lobby.players).length) {
-            setTimeout(finishQuestion, 500); 
-        }
-        
-        return isCorrect;
-    };
-
-    currentTimer = setTimeout(() => { finishQuestion(); }, lobby.settings.timeLimit * 1000);
+  if (isMultiplayer) {
+    // Wait a moment for clients to do their 3-2-1 countdown, then sync start Q1
+    setTimeout(() => {
+      if (lobby.gameInProgress) startMultiplayerRound();
+    }, 3000); 
+  } else {
+    // Single Player: Just set a max timeout for cleanup
+    const totalDurationSeconds = (lobby.settings.timeLimit + 2) * rounds.length + 10;
+    setTimeout(() => { if (lobby.gameInProgress) endGame(); }, totalDurationSeconds * 1000);
   }
 
   function endGame() {
     lobby.gameInProgress = false;
     lobby.gameState = null;
-    lobby.currentAnswerHandler = null;
+    lobby.scoreHandler = null;
+    lobby.finishHandler = null;
+    clearTimeout(roundTimer);
     Object.keys(lobby.players).forEach(pid => lobby.readyState[pid] = false);
     
     const leaderboard = Object.values(gameStats).sort((a, b) => {
@@ -235,25 +234,6 @@ function start(broadcast, lobby, { config, data }) {
     
     broadcast("gameOver", { leaderboard });
     broadcast("lobbyUpdate", lobby);
-  }
-
-  // Preload Q1 Logic
-  if (rounds.length > 0) {
-    const firstRound = rounds[0];
-    const firstPayload = getRoundPayload(firstRound);
-    
-    // 1. If there's an image, tell client to download it now.
-    if (firstPayload.flagPath) {
-        broadcast("gamePreload", { url: firstPayload.flagPath });
-    }
-    
-    // 2. [FIXED] ALWAYS wait 1.5 seconds so the 3-2-1 countdown finishes visibly.
-    setTimeout(() => {
-        if (lobby.gameInProgress) sendQuestion();
-    }, 1500);
-
-  } else {
-    endGame();
   }
 }
 

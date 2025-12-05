@@ -1,27 +1,31 @@
 const socket3 = window.socket;
 let MY_SUBMITTED = false;
 let TIMER_INTERVAL = null;
-let CURRENT_PLAYER_COUNT = 1;
 
-// Client Prediction Data
-let CURRENT_TARGET = ""; 
-let CURRENT_SYNONYMS = [];
-
-// [UPDATED] Autocomplete Data Arrays
+// Autocomplete Data
 let ALL_COUNTRIES_LIST = []; 
 let ALL_CAPITALS_LIST = []; 
 let ALL_LANGUAGES_LIST = [];
 let ALL_SYNONYMS_MAP = {}; 
+let CURRENT_AUTOCOMPLETE_MODE = 'countries';
 
-// [UPDATED] Current Mode for Autocomplete
-let CURRENT_AUTOCOMPLETE_MODE = 'countries'; // 'countries', 'capitals', or 'languages'
-
-// Autocomplete State
+// Suggestion State
 let SUGGESTIONS = [];
 let SUGGESTION_INDEX = 0;
 let HINTS_ENABLED = true;
 
-// --- CLIENT SIDE LOGIC ---
+// Client-Side Game State
+let GAME_MANIFEST = [];
+let CURRENT_Q_INDEX = 0;
+let TIME_LIMIT = 10;
+let IS_GAME_RUNNING = false;
+let IS_MULTIPLAYER = false;
+const IMAGE_CACHE = {}; 
+
+// ----------------------------------
+// UTILS & FUZZY
+// ----------------------------------
+
 function clean(str) {
   if (!str || typeof str !== 'string') return "";
   return str.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
@@ -44,39 +48,47 @@ function levenshtein(a, b) {
   return dp[m][n];
 }
 
-// [UPDATED] checkLocalAnswer generalized
 function checkLocalAnswer(input, targetRaw, synonyms) {
   if (!input || !targetRaw) return false;
   const inp = clean(input);
   const tgt = clean(targetRaw);
-  
   if (inp === tgt) return true;
-  
-  // Array check (Languages) or Map check (Countries)
-  if (synonyms) {
-    if (Array.isArray(synonyms)) {
-       for (let s of synonyms) {
-         if (clean(s) === inp) return true;
-       }
-    } else {
-       // Old Object style fallback
-       for (let s of Object.values(synonyms)) { // This logic is loose, relies on server mostly
-          // We trust the server for synonyms mostly, local is just for instant feedback UI
-       }
-    }
+  if (synonyms && Array.isArray(synonyms)) {
+    for (let s of synonyms) if (clean(s) === inp) return true;
   }
-  
   const dist = levenshtein(inp, tgt);
   const maxLen = Math.max(inp.length, tgt.length);
   const score = (1 - dist / maxLen) * 100;
   if (tgt.length <= 4) return score > 95;
   return score >= 85; 
 }
-// -------------------------------
 
-// --- AUTOCOMPLETE LOGIC ---
+// ----------------------------------
+// PRELOADING LOGIC (ROLLING WINDOW)
+// ----------------------------------
 
-// [UPDATED] Receive Multiple Data Lists
+function preloadImage(url) {
+  if (!url || IMAGE_CACHE[url]) return;
+  const img = new Image();
+  img.src = url;
+  IMAGE_CACHE[url] = img;
+}
+
+function managePreloadBuffer(startIndex) {
+  // Always load the next 3 assets into RAM
+  for (let i = 1; i <= 3; i++) {
+    const idx = startIndex + i;
+    if (idx < GAME_MANIFEST.length) {
+      const q = GAME_MANIFEST[idx];
+      if (q.flagPath) preloadImage(q.flagPath);
+    }
+  }
+}
+
+// ----------------------------------
+// GAME FLOW
+// ----------------------------------
+
 socket3.on("staticData", ({ countries, capitals, languages, synonyms }) => {
     ALL_COUNTRIES_LIST = countries || [];
     ALL_CAPITALS_LIST = capitals || [];
@@ -84,45 +96,225 @@ socket3.on("staticData", ({ countries, capitals, languages, synonyms }) => {
     ALL_SYNONYMS_MAP = synonyms || {};
 });
 
-// Settings Update
 socket3.on("gameStarting", (settings) => {
     HINTS_ENABLED = (settings && settings.hints === false) ? false : true;
-    
     show("game-screen");
+    
+    // Clean UI
     const img = document.getElementById("flag-img");
     img.src = ""; 
     img.classList.add("loading-hidden");
-    
-    // Reset Text Display
-    const textDisplay = document.getElementById("text-question-display");
-    textDisplay.classList.add("hidden");
-    textDisplay.innerText = "";
-    
-    const area = document.getElementById("flag-area");
-    area.classList.remove("map-mode");
+    document.getElementById("text-question-display").classList.add("hidden");
+    document.getElementById("flag-area").classList.remove("map-mode");
     document.getElementById("feedback-ticker").innerHTML = "";
     document.getElementById("progress-indicator").innerText = "";
     document.getElementById("timer-bar").style.width = "100%";
     document.getElementById("question-counter").innerText = "Get Ready!";
     
+    // Reset Input
     const inp = document.getElementById("answer-input");
     inp.value = "";
     inp.className = ""; 
     document.getElementById("ghost-overlay").innerText = "";
     document.getElementById("next-suggestion-btn").classList.add("hidden");
-
-    const overlay = document.getElementById("countdown-overlay");
-    overlay.classList.remove("hidden");
-    let count = 3;
-    overlay.innerText = count;
-    const countdownInt = setInterval(() => {
-        count--;
-        if (count > 0) overlay.innerText = count;
-        else { clearInterval(countdownInt); overlay.classList.add("hidden"); }
-    }, 500); 
 });
 
-// [UPDATED] Intelligent Suggestion Logic
+socket3.on("gameManifest", ({ questions, timeLimit, isMultiplayer }) => {
+    GAME_MANIFEST = questions;
+    TIME_LIMIT = timeLimit;
+    IS_MULTIPLAYER = isMultiplayer;
+    CURRENT_Q_INDEX = 0;
+    IS_GAME_RUNNING = true;
+    
+    // 1. Initial Preload
+    managePreloadBuffer(-1); 
+
+    // 2. Start Countdown (For Single Player this leads to Start. For MP this just syncs the vibe)
+    const overlay = document.getElementById("countdown-overlay");
+    overlay.classList.remove("hidden");
+    let count = 3; 
+    overlay.innerText = count;
+    
+    const countdownInt = setInterval(() => {
+        count--;
+        if (count > 0) {
+            overlay.innerText = count;
+        } else { 
+            clearInterval(countdownInt); 
+            overlay.classList.add("hidden");
+            
+            // SINGLE PLAYER: Start Immediately
+            if (!IS_MULTIPLAYER) {
+                runLocalRound();
+            }
+            // MULTIPLAYER: Wait for "roundStart" event from server
+            else {
+                document.getElementById("question-counter").innerText = "Waiting for server...";
+            }
+        }
+    }, 500);
+});
+
+// MULTIPLAYER SIGNAL: Start Round
+socket3.on("roundStart", ({ roundIndex }) => {
+    if (!IS_MULTIPLAYER || !IS_GAME_RUNNING) return;
+    CURRENT_Q_INDEX = roundIndex;
+    runLocalRound();
+});
+
+// MULTIPLAYER SIGNAL: End Round (Intermission)
+socket3.on("roundEnd", ({ correctTarget }) => {
+    if (!IS_MULTIPLAYER || !IS_GAME_RUNNING) return;
+    
+    // Clear Player Toasts
+    const container = document.getElementById("feedback-ticker");
+    container.innerHTML = "";
+    
+    // Show Answer Pill (Yellow)
+    const ansPill = document.createElement("div");
+    ansPill.className = "ticker-pill pill-answer";
+    ansPill.innerText = correctTarget;
+    container.appendChild(ansPill);
+    
+    // Preload more while waiting
+    managePreloadBuffer(CURRENT_Q_INDEX);
+});
+
+
+function runLocalRound() {
+    if (!IS_GAME_RUNNING) return;
+
+    const roundData = GAME_MANIFEST[CURRENT_Q_INDEX];
+    const { index, imageType, flagPath, target, synonyms, questionText } = roundData;
+    
+    // Preload Next Batch
+    managePreloadBuffer(CURRENT_Q_INDEX);
+
+    MY_SUBMITTED = false;
+    document.getElementById("question-counter").innerText = `Q ${index} / ${GAME_MANIFEST.length}`;
+    
+    const img = document.getElementById("flag-img");
+    const area = document.getElementById("flag-area");
+    const textDisplay = document.getElementById("text-question-display");
+    
+    // Mode
+    if (imageType === 'capital') CURRENT_AUTOCOMPLETE_MODE = 'capitals';
+    else if (imageType === 'language') CURRENT_AUTOCOMPLETE_MODE = 'languages';
+    else CURRENT_AUTOCOMPLETE_MODE = 'countries';
+
+    // Visuals
+    if (imageType === 'capital') {
+        img.classList.add("hidden");
+        area.classList.remove("map-mode");
+        textDisplay.classList.remove("hidden");
+        textDisplay.innerText = questionText;
+    } else {
+        textDisplay.classList.add("hidden");
+        img.classList.remove("hidden");
+        
+        if (imageType === 'map') area.classList.add("map-mode");
+        else area.classList.remove("map-mode");
+        
+        // Instant Swap via Cache
+        if (IMAGE_CACHE[flagPath]) {
+            img.src = IMAGE_CACHE[flagPath].src;
+            img.classList.remove("loading-hidden");
+        } else {
+            img.classList.add("loading-hidden");
+            img.src = flagPath;
+            img.onload = () => img.classList.remove("loading-hidden");
+        }
+    }
+
+    // Reset Inputs
+    const inp = document.getElementById("answer-input");
+    inp.value = "";
+    inp.disabled = false;
+    inp.className = "";
+    inp.focus();
+    document.getElementById("answer-btn").disabled = false;
+    updateGhostText("");
+    
+    // Clear Ticker (Single Player only - MP handles this at roundEnd)
+    if (!IS_MULTIPLAYER) {
+        document.getElementById("feedback-ticker").innerHTML = "";
+    } else {
+        // In MP, ticker starts empty for new round
+        document.getElementById("feedback-ticker").innerHTML = ""; 
+    }
+
+    // Start Timer
+    const bar = document.getElementById("timer-bar");
+    if (TIMER_INTERVAL) clearInterval(TIMER_INTERVAL);
+    
+    let startTime = Date.now();
+    
+    TIMER_INTERVAL = setInterval(() => {
+        if (!IS_GAME_RUNNING) { clearInterval(TIMER_INTERVAL); return; }
+        
+        const elapsed = (Date.now() - startTime) / 1000;
+        const remaining = Math.max(0, TIME_LIMIT - elapsed);
+        bar.style.width = ((remaining / TIME_LIMIT) * 100) + "%";
+        
+        if (remaining <= 0) {
+            finishLocalRound(false); 
+        }
+    }, 50);
+}
+
+function finishLocalRound(isCorrect) {
+    clearInterval(TIMER_INTERVAL);
+    
+    const roundData = GAME_MANIFEST[CURRENT_Q_INDEX];
+    const inp = document.getElementById("answer-input");
+    inp.disabled = true;
+    document.getElementById("answer-btn").disabled = true;
+
+    if (isCorrect) {
+        socket3.emit("submitScore", { 
+            questionIndex: CURRENT_Q_INDEX, 
+            timeTaken: 1000 
+        });
+    }
+
+    // --- SPLIT LOGIC ---
+
+    // SINGLE PLAYER: Show Answer & Auto-Advance
+    if (!IS_MULTIPLAYER) {
+        const container = document.getElementById("feedback-ticker");
+        container.innerHTML = ""; 
+        const ansPill = document.createElement("div");
+        ansPill.className = "ticker-pill pill-answer";
+        ansPill.innerText = roundData.target;
+        container.appendChild(ansPill);
+
+        // Advance or End
+        setTimeout(() => {
+            CURRENT_Q_INDEX++;
+            if (CURRENT_Q_INDEX < GAME_MANIFEST.length) {
+                runLocalRound();
+            } else {
+                IS_GAME_RUNNING = false;
+                document.getElementById("progress-indicator").innerText = "Finished! Calculating...";
+                socket3.emit("playerFinished"); // Triggers stats calc
+            }
+        }, 1500);
+    } 
+    // MULTIPLAYER: Wait for Server
+    else {
+        // Don't show yellow answer pill yet. 
+        // Just show "Waiting..." or keep the toasts visible.
+        document.getElementById("question-counter").innerText = "Waiting for opponents...";
+        
+        // Signal server I am done
+        socket3.emit("playerFinished");
+    }
+}
+
+// ----------------------------------
+// AUTOCOMPLETE & INPUT
+// ----------------------------------
+
 function updateSuggestions(typed) {
     if (!HINTS_ENABLED || !typed || typed.length < 1) {
         SUGGESTIONS = [];
@@ -134,27 +326,18 @@ function updateSuggestions(typed) {
     const search = clean(typed);
     const matches = new Set();
     
-    // 1. Pick the correct source list
-    let sourceList = ALL_COUNTRIES_LIST; // Default
+    let sourceList = ALL_COUNTRIES_LIST;
     if (CURRENT_AUTOCOMPLETE_MODE === 'capitals') sourceList = ALL_CAPITALS_LIST;
     else if (CURRENT_AUTOCOMPLETE_MODE === 'languages') sourceList = ALL_LANGUAGES_LIST;
 
-    // 2. Filter from source
     sourceList.forEach(item => {
         if (clean(item).startsWith(search)) matches.add(item);
     });
 
-    // 3. Synonyms (Only relevant for Countries usually, maybe Languages)
-    // We only check synonyms if mode is Country or Language. Capitals don't usually have aliases here.
     if (CURRENT_AUTOCOMPLETE_MODE === 'countries') {
         Object.keys(ALL_SYNONYMS_MAP).forEach(key => {
             if (clean(key).startsWith(search)) {
-                // Deduplication logic...
-                const officialName = ALL_SYNONYMS_MAP[key];
-                const officialClean = clean(officialName);
-                let already = false;
-                for (let m of matches) if (clean(m) === officialClean) already = true;
-                if (!already) matches.add(key.toUpperCase());
+                matches.add(key.toUpperCase());
             }
         });
     }
@@ -169,13 +352,11 @@ function updateSuggestions(typed) {
 function updateGhostText(text) {
     const ghost = document.getElementById("ghost-overlay");
     const nextBtn = document.getElementById("next-suggestion-btn");
-    
     if (!text) {
         ghost.innerText = "";
         nextBtn.classList.add("hidden");
         return;
     }
-    
     ghost.innerText = text;
     if (SUGGESTIONS.length > 1) nextBtn.classList.remove("hidden");
     else nextBtn.classList.add("hidden");
@@ -187,99 +368,26 @@ function cycleSuggestion() {
     updateGhostText(SUGGESTIONS[SUGGESTION_INDEX]);
 }
 
-// -------------------------------
-
 function addTickerItem(username, isGood) {
   const container = document.getElementById("feedback-ticker");
+  // In Multiplayer, don't clear. In Single Player, current logic clears it via runLocalRound
   const pill = document.createElement("div");
   pill.className = `ticker-pill ${isGood ? "pill-good" : "pill-bad"}`;
   pill.innerText = `${username} ${isGood ? "✓" : "✗"}`;
   container.appendChild(pill);
-  setTimeout(() => {
-    pill.style.opacity = "0";
-    setTimeout(() => pill.remove(), 300);
-  }, 2000);
 }
 
-socket3.on("gamePreload", ({ url }) => {
-  if (url) { const hiddenImg = new Image(); hiddenImg.src = url; }
-});
-
-// [UPDATED] Question Start: Handles Image vs Text switching
-socket3.on("questionStart", ({ index, total, flagPath, timeLimit, playerCount, imageType, target, synonyms, remainingTime, questionText }) => {
-  if (document.getElementById("game-screen").classList.contains("hidden")) {
-    show("game-screen");
-  }
-
-  MY_SUBMITTED = false;
-  CURRENT_PLAYER_COUNT = playerCount;
-  CURRENT_TARGET = target;
-  CURRENT_SYNONYMS = synonyms || [];
-  
-  // Set Autocomplete Mode
-  if (imageType === 'capital') CURRENT_AUTOCOMPLETE_MODE = 'capitals';
-  else if (imageType === 'language') CURRENT_AUTOCOMPLETE_MODE = 'languages';
-  else CURRENT_AUTOCOMPLETE_MODE = 'countries';
-
-  document.getElementById("question-counter").innerText = `Q ${index} / ${total}`;
-  
-  const img = document.getElementById("flag-img");
-  const area = document.getElementById("flag-area");
-  const textDisplay = document.getElementById("text-question-display");
-  
-  // Visual Switching
-  if (imageType === 'capital') {
-      // Text Mode
-      img.classList.add("hidden");
-      area.classList.remove("map-mode");
-      textDisplay.classList.remove("hidden");
-      textDisplay.innerText = questionText || "Capital?";
-  } else {
-      // Image Mode
-      textDisplay.classList.add("hidden");
-      img.classList.remove("hidden");
-      img.classList.add("loading-hidden");
-      
-      if (imageType === 'map') area.classList.add("map-mode");
-      else area.classList.remove("map-mode");
-      
-      img.src = flagPath;
-      img.onload = () => { img.classList.remove("loading-hidden"); };
-  }
-
-  document.getElementById("progress-indicator").innerText = `0/${playerCount} Answered`;
-  document.getElementById("feedback-ticker").innerHTML = "";
-  
-  const inp = document.getElementById("answer-input");
-  inp.value = "";
-  inp.disabled = false;
-  inp.className = "";
-  inp.focus();
-  document.getElementById("answer-btn").disabled = false;
-  
-  updateGhostText("");
-
-  const bar = document.getElementById("timer-bar");
-  if (TIMER_INTERVAL) clearInterval(TIMER_INTERVAL);
-  const initialTime = (remainingTime !== undefined) ? remainingTime : timeLimit;
-  bar.style.width = ((initialTime / timeLimit) * 100) + "%";
-  const start = Date.now();
-  TIMER_INTERVAL = setInterval(() => {
-    const elapsed = (Date.now() - start) / 1000;
-    const currentRemaining = Math.max(0, initialTime - elapsed);
-    bar.style.width = ((currentRemaining / timeLimit) * 100) + "%";
-    if (currentRemaining <= 0) clearInterval(TIMER_INTERVAL);
-  }, 50);
-});
+// ----------------------------------
+// SUBMISSION LOGIC
+// ----------------------------------
 
 function submitGuess() {
-  if (MY_SUBMITTED) return;
+  if (MY_SUBMITTED || !IS_GAME_RUNNING) return;
   
   const inp = document.getElementById("answer-input");
   const ghost = document.getElementById("ghost-overlay");
   
   let val = inp.value.trim();
-  
   if (HINTS_ENABLED && ghost.innerText && ghost.innerText.toLowerCase().startsWith(val.toLowerCase())) {
       val = ghost.innerText;
       inp.value = val; 
@@ -292,75 +400,44 @@ function submitGuess() {
   document.getElementById("answer-btn").disabled = true;
   document.getElementById("next-suggestion-btn").classList.add("hidden");
   
-  if (CURRENT_PLAYER_COUNT === 1) clearInterval(TIMER_INTERVAL);
-
-  // Optimistic UI check (Rough)
-  const isLikelyCorrect = checkLocalAnswer(val, CURRENT_TARGET, CURRENT_SYNONYMS);
+  const roundData = GAME_MANIFEST[CURRENT_Q_INDEX];
+  const isCorrect = checkLocalAnswer(val, roundData.target, roundData.synonyms);
   
-  if (isLikelyCorrect) {
-    inp.classList.add("input-correct");
-    addTickerItem(window.USERNAME || "You", true);
+  if (isCorrect) {
+      inp.classList.add("input-correct");
+      addTickerItem(window.USERNAME || "You", true);
+      finishLocalRound(true);
   } else {
-    inp.classList.add("input-wrong");
-    addTickerItem(window.USERNAME || "You", false);
+      inp.classList.add("input-wrong");
+      addTickerItem(window.USERNAME || "You", false);
+      finishLocalRound(false);
   }
-  
-  socket3.emit("submitAnswer", { answer: val });
 }
 
+// ----------------------------------
+// LISTENERS
+// ----------------------------------
+
 const inputEl = document.getElementById("answer-input");
-
-inputEl.oninput = (e) => {
-    updateSuggestions(e.target.value);
-};
-
+inputEl.oninput = (e) => updateSuggestions(e.target.value);
 inputEl.onkeydown = (e) => {
   if (e.key === "Enter") submitGuess();
-  if (e.key === "Tab") {
-      e.preventDefault(); 
-      cycleSuggestion(); 
-  }
+  if (e.key === "Tab") { e.preventDefault(); cycleSuggestion(); }
 };
-
-document.getElementById("next-suggestion-btn").onclick = () => {
-    cycleSuggestion();
-    inputEl.focus(); 
-};
-
+document.getElementById("next-suggestion-btn").onclick = () => { cycleSuggestion(); inputEl.focus(); };
 document.getElementById("answer-btn").onclick = submitGuess;
 
-socket3.on("answerResult", ({ correct }) => {
-  const inp = document.getElementById("answer-input");
-  const hasCorrect = inp.classList.contains("input-correct");
-  const hasWrong = inp.classList.contains("input-wrong");
-
-  if ((!hasCorrect && !hasWrong) || (correct && hasWrong) || (!correct && hasCorrect)) {
-      inp.classList.remove("input-correct", "input-wrong");
-      if (correct) inp.classList.add("input-correct");
-      else inp.classList.add("input-wrong");
-  }
-});
-
-socket3.on("playerUpdate", ({ username, isCorrect, answeredCount, totalPlayers }) => {
-  document.getElementById("progress-indicator").innerText = `${answeredCount}/${totalPlayers} Answered`;
+socket3.on("playerUpdate", ({ username, isCorrect }) => {
   if (username !== (window.USERNAME || "You")) {
      addTickerItem(username, isCorrect);
   }
 });
 
-socket3.on("questionEnd", ({ correctCountry, preload }) => {
-  clearInterval(TIMER_INTERVAL);
-  const container = document.getElementById("feedback-ticker");
-  container.innerHTML = ""; 
-  const ansPill = document.createElement("div");
-  ansPill.className = "ticker-pill pill-answer";
-  ansPill.innerText = correctCountry;
-  container.appendChild(ansPill);
-  if (preload && preload.url) { const hiddenImg = new Image(); hiddenImg.src = preload.url; }
-});
-
 socket3.on("gameOver", ({ leaderboard }) => {
+  IS_GAME_RUNNING = false;
+  clearInterval(TIMER_INTERVAL);
   show("game-over-screen");
+  
   const tbody = document.getElementById("leaderboard-body");
   tbody.innerHTML = "";
   if (Array.isArray(leaderboard) && leaderboard.length > 0) {
