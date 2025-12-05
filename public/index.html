@@ -69,10 +69,14 @@
     <div id="host-settings" class="host-only hidden">
       <h3>Settings</h3>
       
-      <div class="segmented-control">
-        <button id="type-flags" class="seg-btn" value="flags">Flags 🏳️</button>
-        <button id="type-shapes" class="seg-btn" value="maps">Shapes 🗺️</button>
-        <button id="type-mixed" class="seg-btn" value="mixed">Mixed 🎲</button>
+      <!-- [UPDATED] Mode Selection Grid -->
+      <label style="display:block; text-align:left; color:#aaa; font-size:0.8em; margin-bottom:5px;">Game Mode</label>
+      <div class="mode-grid">
+        <button class="seg-btn" value="flags">Flags 🏳️</button>
+        <button class="seg-btn" value="maps">Shapes 🗺️</button>
+        <button class="seg-btn" value="capitals">Capitals 🏛️</button>
+        <button class="seg-btn" value="languages">Languages 🗣️</button>
+        <button class="seg-btn full-width active" value="mixed">Mixed 🎲</button>
       </div>
 
       <div class="chk-group">
@@ -84,7 +88,6 @@
         <label><input type="checkbox" class="cont-chk" value="Oceania"> Oceania</label>
       </div>
 
-      <!-- NEW SETTING: SPELLING HINTS -->
       <div class="setting-single">
          <label><input type="checkbox" id="hints-chk" checked> Spelling Hints / Autocomplete</label>
       </div>
@@ -104,7 +107,7 @@
       </div>
 
       <button id="start-game-btn" class="action-btn">Start Game</button>
-      <div id="wait-msg" class="hidden" style="color:#aaa; font-size:0.8rem; margin-top:5px;">Waiting for players to ready up...</div>
+      <div id="wait-msg" class="hidden" style="color:#aaa; font-size:0.8rem; margin-top:5px;">Waiting for players...</div>
     </div>
 
     <div id="player-ready-area">
@@ -123,13 +126,16 @@
       
       <div id="flag-area">
         <div id="countdown-overlay" class="hidden"></div>
+        
+        <!-- [UPDATED] Flag Image OR Text Question -->
         <img id="flag-img" src="" alt="Flag" />
+        <div id="text-question-display" class="hidden"></div>
+      
       </div>
       
       <div id="feedback-ticker"></div>
       <div id="progress-indicator">Waiting...</div>
       
-      <!-- UPDATED ANSWER AREA -->
       <div id="answer-area">
         <div class="autocomplete-wrapper">
           <span id="ghost-overlay"></span>

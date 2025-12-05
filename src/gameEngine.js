@@ -1,17 +1,76 @@
-// src/gameEngine.js
 const { evaluateAnswer } = require("./fuzzy");
 
-function pickQuestions(countries, continents, count) {
-  const list = Object.values(countries);
-  const filtered = continents && continents.length > 0
-      ? list.filter((c) => continents.includes(c.continent))
-      : list;
-
-  for (let i = filtered.length - 1; i > 0; i--) {
+// Helper to pick items securely
+function shuffle(array) {
+  for (let i = array.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
-    [filtered[i], filtered[j]] = [filtered[j], filtered[i]];
+    [array[i], array[j]] = [array[j], array[i]];
   }
-  return filtered.slice(0, count);
+  return array;
+}
+
+function generateRoundList(settings, data) {
+  const rounds = [];
+  const count = settings.questions || 10;
+  
+  // 1. Prepare Pools
+  // Pool A: Countries (Filtered by Continent)
+  const countryList = Object.values(data.countries);
+  const filteredCountries = (settings.continents && settings.continents.length > 0)
+      ? countryList.filter((c) => settings.continents.includes(c.continent))
+      : countryList;
+  
+  // Pool B: Languages (Global)
+  const languageList = Object.values(data.languages || {});
+
+  // Shuffle pools once
+  shuffle(filteredCountries);
+  shuffle(languageList);
+
+  let cIndex = 0;
+  let lIndex = 0;
+
+  for (let i = 0; i < count; i++) {
+    // 2. Determine Type
+    let type = 'flag'; // Default
+    const mode = settings.gameType || 'mixed';
+
+    if (mode === 'flags') type = 'flag';
+    else if (mode === 'maps') type = 'map';
+    else if (mode === 'capitals') type = 'capital';
+    else if (mode === 'languages') type = 'language';
+    else {
+      // Mixed Mode: 25% chance each
+      const roll = Math.random();
+      if (roll < 0.25) type = 'flag';
+      else if (roll < 0.50) type = 'map';
+      else if (roll < 0.75) type = 'capital';
+      else type = 'language';
+    }
+
+    // 3. Pick Data based on Type
+    if (type === 'language') {
+      if (languageList.length === 0) { type = 'flag'; } // Fallback
+      else {
+        const item = languageList[lIndex % languageList.length];
+        lIndex++;
+        rounds.push({ type, item });
+        continue;
+      }
+    }
+
+    // Flag/Map/Capital
+    if (filteredCountries.length === 0) break; // Emergency exit
+    const item = filteredCountries[cIndex % filteredCountries.length];
+    cIndex++;
+    
+    // Skip Capitals if data missing
+    if (type === 'capital' && !item.capital) type = 'flag';
+
+    rounds.push({ type, item });
+  }
+
+  return rounds;
 }
 
 function start(broadcast, lobby, { config, data }) {
@@ -21,53 +80,78 @@ function start(broadcast, lobby, { config, data }) {
     gameStats[pid] = { points: 0, totalTime: 0, username: players[pid].username || "Guest" };
   });
 
-  const questions = pickQuestions(data.countries, lobby.settings.continents, lobby.settings.questions);
+  const rounds = generateRoundList(lobby.settings, data);
   let currentIndex = 0;
   let currentTimer = null;
   let isRoundActive = false;
-  let nextRoundInfo = null;
 
-  // Initialize Game State for Snapshots
+  // Initialize Game State
   lobby.gameState = {
     active: true,
     questionIndex: 0,
-    totalQuestions: questions.length,
+    totalQuestions: rounds.length,
     currentQuestion: null,
     startTime: 0,
     timeLimit: lobby.settings.timeLimit
   };
 
-  function determineQuestionType() {
-    const type = lobby.settings.gameType || 'mixed';
-    if (type === 'maps') return true; 
-    if (type === 'flags') return false; 
-    return Math.random() > 0.5; 
+  // Helper to construct round payload
+  function getRoundPayload(roundObj) {
+    const { type, item } = roundObj;
+    let payload = {
+      imageType: type,
+      flagPath: null, // Default null for Capital
+      target: "",
+      synonyms: [],
+      questionText: "" // New field
+    };
+
+    if (type === 'language') {
+      // Pick random image 1-3
+      const num = Math.floor(Math.random() * 3) + 1;
+      payload.flagPath = `languages/${item.id}_${num}.png`;
+      payload.target = item.name;
+      payload.synonyms = item.synonyms || [];
+      payload.questionText = "Guess the Language";
+    } else if (type === 'capital') {
+      payload.target = item.capital;
+      payload.questionText = `What is the capital of ${item.name}?`;
+      // No synonyms for capitals in this version, or strict match
+      payload.synonyms = []; 
+    } else {
+      // Flag or Map
+      payload.flagPath = (type === 'map') 
+        ? `maps/${item.code}.svg` 
+        : (item.flag_4x3 || `flags/4x3/${item.code}.svg`);
+      
+      payload.target = item.name;
+      
+      // Filter synonyms for this specific country from the big map
+      const relevant = Object.keys(data.synonyms).filter(k => data.synonyms[k] === item.name);
+      payload.synonyms = relevant;
+      payload.questionText = "Guess the Country";
+    }
+
+    return payload;
   }
 
   function sendQuestion() {
-    if (currentIndex >= questions.length) {
+    if (currentIndex >= rounds.length) {
       endGame();
       return;
     }
 
-    const q = questions[currentIndex];
+    const round = rounds[currentIndex];
     const answersThisRound = new Set(); 
     isRoundActive = true;
 
-    const useMap = nextRoundInfo ? nextRoundInfo.useMap : determineQuestionType();
-    nextRoundInfo = null; 
-    
-    const imagePath = useMap ? `maps/${q.code}.svg` : (q.flag_4x3 || `flags/4x3/${q.code}.svg`);
-    const relevantSynonyms = Object.keys(data.synonyms).filter(key => data.synonyms[key] === q.name);
+    const payload = getRoundPayload(round);
 
     // [SNAPSHOT] Update Lobby State
     lobby.gameState.currentQuestion = {
       index: currentIndex + 1,
-      total: questions.length,
-      flagPath: imagePath,
-      imageType: useMap ? 'map' : 'flag',
-      target: q.name,
-      synonyms: relevantSynonyms
+      total: rounds.length,
+      ...payload
     };
     lobby.gameState.startTime = Date.now();
     lobby.gameState.isRoundActive = true;
@@ -83,21 +167,22 @@ function start(broadcast, lobby, { config, data }) {
     function finishQuestion() {
       if (!isRoundActive) return;
       isRoundActive = false;
-      lobby.gameState.isRoundActive = false; // Mark round as done in state
+      lobby.gameState.isRoundActive = false;
       
       clearTimeout(currentTimer);
 
       let preloadData = null;
-      if (currentIndex + 1 < questions.length) {
-        const nextQ = questions[currentIndex + 1];
-        const nextUseMap = determineQuestionType();
-        nextRoundInfo = { useMap: nextUseMap };
-        const nextPath = nextUseMap ? `maps/${nextQ.code}.svg` : (nextQ.flag_4x3 || `flags/4x3/${nextQ.code}.svg`);
-        preloadData = { url: nextPath };
+      if (currentIndex + 1 < rounds.length) {
+        const nextRound = rounds[currentIndex + 1];
+        const nextPayload = getRoundPayload(nextRound);
+        // Only preload if there is an image (Flag/Map/Language)
+        if (nextPayload.flagPath) {
+           preloadData = { url: nextPayload.flagPath };
+        }
       }
 
       broadcast("questionEnd", { 
-        correctCountry: q.name,
+        correctCountry: payload.target, // Reusing field name for compatibility
         preload: preloadData 
       });
 
@@ -110,7 +195,9 @@ function start(broadcast, lobby, { config, data }) {
         if (answersThisRound.has(pid)) return false;
 
         const timeTaken = Date.now() - startTime;
-        const isCorrect = evaluateAnswer(answer, q, data.synonyms, config);
+        
+        // [UPDATED] Pass specific target string to fuzzy
+        const isCorrect = evaluateAnswer(answer, payload.target, payload.synonyms, config);
 
         answersThisRound.add(pid);
         if (isCorrect) {
@@ -137,7 +224,7 @@ function start(broadcast, lobby, { config, data }) {
 
   function endGame() {
     lobby.gameInProgress = false;
-    lobby.gameState = null; // Clear state
+    lobby.gameState = null;
     lobby.currentAnswerHandler = null;
     Object.keys(lobby.players).forEach(pid => lobby.readyState[pid] = false);
     
@@ -151,16 +238,20 @@ function start(broadcast, lobby, { config, data }) {
   }
 
   // Preload Q1 Logic
-  if (questions.length > 0) {
-    const firstQ = questions[0];
-    const firstUseMap = determineQuestionType();
-    nextRoundInfo = { useMap: firstUseMap };
-    const firstPath = firstUseMap ? `maps/${firstQ.code}.svg` : (firstQ.flag_4x3 || `flags/4x3/${firstQ.code}.svg`);
+  if (rounds.length > 0) {
+    const firstRound = rounds[0];
+    const firstPayload = getRoundPayload(firstRound);
     
-    broadcast("gamePreload", { url: firstPath });
-    setTimeout(() => {
+    // Only send preload if url exists (Languages/Flags), not Capitals
+    if (firstPayload.flagPath) {
+        broadcast("gamePreload", { url: firstPayload.flagPath });
+        setTimeout(() => {
+            if (lobby.gameInProgress) sendQuestion();
+        }, 1500);
+    } else {
+        // Start immediately for text-only questions
         if (lobby.gameInProgress) sendQuestion();
-    }, 1500);
+    }
   } else {
     endGame();
   }

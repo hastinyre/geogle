@@ -1,4 +1,3 @@
-// public/gameui.js
 const socket3 = window.socket;
 let MY_SUBMITTED = false;
 let TIMER_INTERVAL = null;
@@ -7,8 +6,15 @@ let CURRENT_PLAYER_COUNT = 1;
 // Client Prediction Data
 let CURRENT_TARGET = ""; 
 let CURRENT_SYNONYMS = [];
+
+// [UPDATED] Autocomplete Data Arrays
 let ALL_COUNTRIES_LIST = []; 
+let ALL_CAPITALS_LIST = []; 
+let ALL_LANGUAGES_LIST = [];
 let ALL_SYNONYMS_MAP = {}; 
+
+// [UPDATED] Current Mode for Autocomplete
+let CURRENT_AUTOCOMPLETE_MODE = 'countries'; // 'countries', 'capitals', or 'languages'
 
 // Autocomplete State
 let SUGGESTIONS = [];
@@ -38,17 +44,28 @@ function levenshtein(a, b) {
   return dp[m][n];
 }
 
+// [UPDATED] checkLocalAnswer generalized
 function checkLocalAnswer(input, targetRaw, synonyms) {
   if (!input || !targetRaw) return false;
   const inp = clean(input);
   const tgt = clean(targetRaw);
   
   if (inp === tgt) return true;
-  if (Array.isArray(synonyms)) {
-    for (let s of synonyms) {
-      if (clean(s) === inp) return true;
+  
+  // Array check (Languages) or Map check (Countries)
+  if (synonyms) {
+    if (Array.isArray(synonyms)) {
+       for (let s of synonyms) {
+         if (clean(s) === inp) return true;
+       }
+    } else {
+       // Old Object style fallback
+       for (let s of Object.values(synonyms)) { // This logic is loose, relies on server mostly
+          // We trust the server for synonyms mostly, local is just for instant feedback UI
+       }
     }
   }
+  
   const dist = levenshtein(inp, tgt);
   const maxLen = Math.max(inp.length, tgt.length);
   const score = (1 - dist / maxLen) * 100;
@@ -59,9 +76,11 @@ function checkLocalAnswer(input, targetRaw, synonyms) {
 
 // --- AUTOCOMPLETE LOGIC ---
 
-// Receive Data on Connection
-socket3.on("staticData", ({ countries, synonyms }) => {
+// [UPDATED] Receive Multiple Data Lists
+socket3.on("staticData", ({ countries, capitals, languages, synonyms }) => {
     ALL_COUNTRIES_LIST = countries || [];
+    ALL_CAPITALS_LIST = capitals || [];
+    ALL_LANGUAGES_LIST = languages || [];
     ALL_SYNONYMS_MAP = synonyms || {};
 });
 
@@ -69,11 +88,16 @@ socket3.on("staticData", ({ countries, synonyms }) => {
 socket3.on("gameStarting", (settings) => {
     HINTS_ENABLED = (settings && settings.hints === false) ? false : true;
     
-    // Reset UI
     show("game-screen");
     const img = document.getElementById("flag-img");
     img.src = ""; 
     img.classList.add("loading-hidden");
+    
+    // Reset Text Display
+    const textDisplay = document.getElementById("text-question-display");
+    textDisplay.classList.add("hidden");
+    textDisplay.innerText = "";
+    
     const area = document.getElementById("flag-area");
     area.classList.remove("map-mode");
     document.getElementById("feedback-ticker").innerHTML = "";
@@ -81,7 +105,6 @@ socket3.on("gameStarting", (settings) => {
     document.getElementById("timer-bar").style.width = "100%";
     document.getElementById("question-counter").innerText = "Get Ready!";
     
-    // Reset Inputs
     const inp = document.getElementById("answer-input");
     inp.value = "";
     inp.className = ""; 
@@ -99,7 +122,7 @@ socket3.on("gameStarting", (settings) => {
     }, 500); 
 });
 
-// Update suggestions based on input
+// [UPDATED] Intelligent Suggestion Logic
 function updateSuggestions(typed) {
     if (!HINTS_ENABLED || !typed || typed.length < 1) {
         SUGGESTIONS = [];
@@ -111,52 +134,36 @@ function updateSuggestions(typed) {
     const search = clean(typed);
     const matches = new Set();
     
-    // 1. Official Names starting with input
-    ALL_COUNTRIES_LIST.forEach(c => {
-        if (clean(c).startsWith(search)) matches.add(c);
+    // 1. Pick the correct source list
+    let sourceList = ALL_COUNTRIES_LIST; // Default
+    if (CURRENT_AUTOCOMPLETE_MODE === 'capitals') sourceList = ALL_CAPITALS_LIST;
+    else if (CURRENT_AUTOCOMPLETE_MODE === 'languages') sourceList = ALL_LANGUAGES_LIST;
+
+    // 2. Filter from source
+    sourceList.forEach(item => {
+        if (clean(item).startsWith(search)) matches.add(item);
     });
 
-    // 2. Synonyms starting with input (Deduplicate)
-    Object.keys(ALL_SYNONYMS_MAP).forEach(key => {
-        if (clean(key).startsWith(search)) {
-            // "Unique Country Match" Strategy:
-            // If the official name for this synonym is ALREADY matched, skip the synonym
-            // e.g. User types "U". "United States" is matched. We skip "USA" synonym?
-            // User requested: "Next" button cycles. 
-            // Better logic: Show synonym only if it adds a distinct string option.
-            
-            // Actually, simplest is just add the key (e.g. "UAE")
-            // But we don't want "United Arab Emirates" AND "UAE" in the list? 
-            // User said: "Unique Country Match... Never show two options for the same country."
-            
-            const officialName = ALL_SYNONYMS_MAP[key];
-            const officialClean = clean(officialName);
-            
-            // Check if we already have the official name in our set?
-            // Actually, we store the *DISPLAY STRING* in the Set.
-            
-            let alreadyHasOfficial = false;
-            for (let m of matches) {
-                if (clean(m) === officialClean) alreadyHasOfficial = true;
+    // 3. Synonyms (Only relevant for Countries usually, maybe Languages)
+    // We only check synonyms if mode is Country or Language. Capitals don't usually have aliases here.
+    if (CURRENT_AUTOCOMPLETE_MODE === 'countries') {
+        Object.keys(ALL_SYNONYMS_MAP).forEach(key => {
+            if (clean(key).startsWith(search)) {
+                // Deduplication logic...
+                const officialName = ALL_SYNONYMS_MAP[key];
+                const officialClean = clean(officialName);
+                let already = false;
+                for (let m of matches) if (clean(m) === officialClean) already = true;
+                if (!already) matches.add(key.toUpperCase());
             }
-
-            // If we don't have the official name yet (maybe user typed "UA" and official is "United..."), 
-            // then we add the SYNONYM to the list.
-            if (!alreadyHasOfficial) {
-                matches.add(key.toUpperCase()); // Show synonyms in caps usually looks better (UAE, USA)
-            }
-        }
-    });
+        });
+    }
 
     SUGGESTIONS = Array.from(matches).sort();
     SUGGESTION_INDEX = 0;
     
-    // Render first match
-    if (SUGGESTIONS.length > 0) {
-        updateGhostText(SUGGESTIONS[0]);
-    } else {
-        updateGhostText("");
-    }
+    if (SUGGESTIONS.length > 0) updateGhostText(SUGGESTIONS[0]);
+    else updateGhostText("");
 }
 
 function updateGhostText(text) {
@@ -170,7 +177,6 @@ function updateGhostText(text) {
     }
     
     ghost.innerText = text;
-    // Only show "Next" if there are multiple options
     if (SUGGESTIONS.length > 1) nextBtn.classList.remove("hidden");
     else nextBtn.classList.add("hidden");
 }
@@ -199,7 +205,8 @@ socket3.on("gamePreload", ({ url }) => {
   if (url) { const hiddenImg = new Image(); hiddenImg.src = url; }
 });
 
-socket3.on("questionStart", ({ index, total, flagPath, timeLimit, playerCount, imageType, target, synonyms, remainingTime }) => {
+// [UPDATED] Question Start: Handles Image vs Text switching
+socket3.on("questionStart", ({ index, total, flagPath, timeLimit, playerCount, imageType, target, synonyms, remainingTime, questionText }) => {
   if (document.getElementById("game-screen").classList.contains("hidden")) {
     show("game-screen");
   }
@@ -209,19 +216,40 @@ socket3.on("questionStart", ({ index, total, flagPath, timeLimit, playerCount, i
   CURRENT_TARGET = target;
   CURRENT_SYNONYMS = synonyms || [];
   
+  // Set Autocomplete Mode
+  if (imageType === 'capital') CURRENT_AUTOCOMPLETE_MODE = 'capitals';
+  else if (imageType === 'language') CURRENT_AUTOCOMPLETE_MODE = 'languages';
+  else CURRENT_AUTOCOMPLETE_MODE = 'countries';
+
   document.getElementById("question-counter").innerText = `Q ${index} / ${total}`;
+  
   const img = document.getElementById("flag-img");
   const area = document.getElementById("flag-area");
-  img.classList.add("loading-hidden");
-  if (imageType === 'map') area.classList.add("map-mode");
-  else area.classList.remove("map-mode");
-  img.src = flagPath;
-  img.onload = () => { img.classList.remove("loading-hidden"); };
+  const textDisplay = document.getElementById("text-question-display");
+  
+  // Visual Switching
+  if (imageType === 'capital') {
+      // Text Mode
+      img.classList.add("hidden");
+      area.classList.remove("map-mode");
+      textDisplay.classList.remove("hidden");
+      textDisplay.innerText = questionText || "Capital?";
+  } else {
+      // Image Mode
+      textDisplay.classList.add("hidden");
+      img.classList.remove("hidden");
+      img.classList.add("loading-hidden");
+      
+      if (imageType === 'map') area.classList.add("map-mode");
+      else area.classList.remove("map-mode");
+      
+      img.src = flagPath;
+      img.onload = () => { img.classList.remove("loading-hidden"); };
+  }
 
   document.getElementById("progress-indicator").innerText = `0/${playerCount} Answered`;
   document.getElementById("feedback-ticker").innerHTML = "";
   
-  // Input Reset
   const inp = document.getElementById("answer-input");
   inp.value = "";
   inp.disabled = false;
@@ -229,10 +257,8 @@ socket3.on("questionStart", ({ index, total, flagPath, timeLimit, playerCount, i
   inp.focus();
   document.getElementById("answer-btn").disabled = false;
   
-  // Clear Ghost
   updateGhostText("");
 
-  // Timer
   const bar = document.getElementById("timer-bar");
   if (TIMER_INTERVAL) clearInterval(TIMER_INTERVAL);
   const initialTime = (remainingTime !== undefined) ? remainingTime : timeLimit;
@@ -254,10 +280,9 @@ function submitGuess() {
   
   let val = inp.value.trim();
   
-  // If Ghost text is visible and valid, prefer it
   if (HINTS_ENABLED && ghost.innerText && ghost.innerText.toLowerCase().startsWith(val.toLowerCase())) {
       val = ghost.innerText;
-      inp.value = val; // visually fill it in
+      inp.value = val; 
   }
   
   if (!val) return;
@@ -269,6 +294,7 @@ function submitGuess() {
   
   if (CURRENT_PLAYER_COUNT === 1) clearInterval(TIMER_INTERVAL);
 
+  // Optimistic UI check (Rough)
   const isLikelyCorrect = checkLocalAnswer(val, CURRENT_TARGET, CURRENT_SYNONYMS);
   
   if (isLikelyCorrect) {
@@ -282,7 +308,6 @@ function submitGuess() {
   socket3.emit("submitAnswer", { answer: val });
 }
 
-// EVENT HANDLERS
 const inputEl = document.getElementById("answer-input");
 
 inputEl.oninput = (e) => {
@@ -292,14 +317,14 @@ inputEl.oninput = (e) => {
 inputEl.onkeydown = (e) => {
   if (e.key === "Enter") submitGuess();
   if (e.key === "Tab") {
-      e.preventDefault(); // Don't lose focus
-      cycleSuggestion(); // Or select current? User asked for Next button, Tab cycling is a nice bonus.
+      e.preventDefault(); 
+      cycleSuggestion(); 
   }
 };
 
 document.getElementById("next-suggestion-btn").onclick = () => {
     cycleSuggestion();
-    inputEl.focus(); // Keep focus on input
+    inputEl.focus(); 
 };
 
 document.getElementById("answer-btn").onclick = submitGuess;

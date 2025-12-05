@@ -1,12 +1,16 @@
 import { start as startGameEngine } from "./gameEngine.js";
 import countriesRaw from "./data/country.json";
 import synonymsRaw from "./data/synonyms.json";
+import languagesRaw from "./data/languages.json"; // [NEW]
 import lobbyNamesRaw from "./data/lobbyNames.json";
 
 const data = {
   countries: {},
+  languages: {}, // [NEW]
   synonyms: {},
-  simpleCountryList: [], // Optimized list for client autocomplete
+  simpleCountryList: [], 
+  simpleCapitalList: [], // [NEW]
+  simpleLanguageList: [], // [NEW]
   continentCounts: { "all": 0 }
 };
 
@@ -15,17 +19,32 @@ function normalize(str) {
 }
 
 (function initData() {
+  // 1. Synonyms
   for (const [key, val] of Object.entries(synonymsRaw)) {
     data.synonyms[normalize(key)] = val;
   }
+
+  // 2. Countries & Capitals
   countriesRaw.forEach(c => {
     const normName = normalize(c.name);
     const tokens = normName.split(" ").filter(Boolean);
     const cont = c.continent || "Other";
+    
     data.continentCounts[cont] = (data.continentCounts[cont] || 0) + 1;
     data.continentCounts["all"]++;
+    
     data.countries[c.code] = { ...c, displayName: c.name, normalizedName: normName, tokens: tokens };
     data.simpleCountryList.push(c.name);
+    
+    if (c.capital) {
+      data.simpleCapitalList.push(c.capital); // [NEW] Extract Capital
+    }
+  });
+
+  // 3. Languages [NEW]
+  languagesRaw.forEach(l => {
+    data.languages[l.id] = l;
+    data.simpleLanguageList.push(l.name);
   });
 })();
 
@@ -84,12 +103,14 @@ export class GameLobby {
 
     ws.send(JSON.stringify({ event: "init", id: playerId, sessionId }));
     
-    // SEND STATIC DATA FOR AUTOCOMPLETE
+    // [UPDATED] SEND STATIC DATA (Now includes Capitals and Languages)
     ws.send(JSON.stringify({ 
       event: "staticData", 
       payload: { 
         countries: data.simpleCountryList,
-        synonyms: synonymsRaw // Send raw map for client logic
+        capitals: data.simpleCapitalList, // [NEW]
+        languages: data.simpleLanguageList, // [NEW]
+        synonyms: synonymsRaw 
       } 
     }));
     
@@ -220,8 +241,8 @@ export class GameLobby {
         continents: [], 
         questions: 10, 
         timeLimit: 10, 
-        gameType: 'mixed',
-        hints: true // Default ON
+        gameType: 'mixed', // This will now cover Flags/Shapes/Capitals/Languages
+        hints: true 
       }
     };
 
@@ -314,17 +335,12 @@ export class GameLobby {
     if (!lobby) return;
     if (!force && lobby.hostId !== playerId) return;
 
-    // STRICT READY CHECK
-    // In Public or Private lobbies, all non-host players must be ready.
-    // If it's a single player game, we ignore this.
     if (lobby.type === 'private' || lobby.type === 'public') {
       const allReady = Object.keys(lobby.players).every(pid => {
-        // Host is implicitly ready by clicking start, everyone else must be checked
         return (pid === lobby.hostId) || lobby.readyState[pid];
       });
 
       if (!allReady) {
-        // Optionally send a warning to the host, but the UI handles disabled button.
         return; 
       }
     }
