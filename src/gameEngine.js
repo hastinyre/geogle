@@ -196,7 +196,7 @@ function start(broadcast, lobby, { config, data }) {
 
         const timeTaken = Date.now() - startTime;
         
-        // [UPDATED] Pass specific target string to fuzzy
+        // Pass specific target string to fuzzy
         const isCorrect = evaluateAnswer(answer, payload.target, payload.synonyms, config);
 
         answersThisRound.add(pid);
@@ -242,16 +242,16 @@ function start(broadcast, lobby, { config, data }) {
     const firstRound = rounds[0];
     const firstPayload = getRoundPayload(firstRound);
     
-    // Only send preload if url exists (Languages/Flags), not Capitals
+    // 1. If there's an image, tell client to download it now.
     if (firstPayload.flagPath) {
         broadcast("gamePreload", { url: firstPayload.flagPath });
-        setTimeout(() => {
-            if (lobby.gameInProgress) sendQuestion();
-        }, 1500);
-    } else {
-        // Start immediately for text-only questions
-        if (lobby.gameInProgress) sendQuestion();
     }
+    
+    // 2. [FIXED] ALWAYS wait 1.5 seconds so the 3-2-1 countdown finishes visibly.
+    setTimeout(() => {
+        if (lobby.gameInProgress) sendQuestion();
+    }, 1500);
+
   } else {
     endGame();
   }
