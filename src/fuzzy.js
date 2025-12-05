@@ -1,3 +1,6 @@
+// server/fuzzy.js
+
+// Helper to clean strings locally (Self-contained)
 function clean(str) {
   if (!str || typeof str !== 'string') return "";
   return str
@@ -33,40 +36,32 @@ function levenshtein(a, b) {
   return dp[m][n];
 }
 
-// [UPDATED] Generalized signature: accepts targetString instead of countryObj
-module.exports.evaluateAnswer = function (inputRaw, targetString, synonyms, config) {
+module.exports.evaluateAnswer = function (inputRaw, countryObj, synonyms, config) {
   try {
-    if (!targetString) return false;
+    if (!countryObj || !countryObj.name) return false;
 
     const input = clean(inputRaw);
     if (!input) return false;
 
-    const targetClean = clean(targetString);
+    const targetName = clean(countryObj.name);
     
     // 1. Direct Match
-    if (input === targetClean) return true;
+    if (input === targetName) return true;
 
     // 2. Synonym Match
-    // Synonyms can be an Array (Languages) or an Object/Map (Countries)
-    if (synonyms) {
-      if (Array.isArray(synonyms)) {
-        // Language style: ["Mandarin", "Putonghua"]
-        for (const s of synonyms) {
-          if (clean(s) === input) return true;
-        }
-      } else if (synonyms[input]) {
-        // Country style: Map input -> official name
-        const mapped = clean(synonyms[input]);
-        if (mapped === targetClean) return true;
-      }
+    if (synonyms && synonyms[input]) {
+      const mapped = clean(synonyms[input]);
+      if (mapped === targetName) return true;
     }
 
     // 3. Fuzzy / Levenshtein
-    const targetTokens = getTokens(targetClean);
+    // If country object doesn't have pre-calc tokens, make them now
+    const targetTokens = countryObj.tokens || getTokens(targetName);
     const inputTokens = getTokens(input);
 
-    const dist = levenshtein(input, targetClean);
-    const maxLen = Math.max(input.length, targetClean.length);
+    // Levenshtein Score
+    const dist = levenshtein(input, targetName);
+    const maxLen = Math.max(input.length, targetName.length);
     const levScore = (1 - dist / maxLen) * 100;
 
     // Token Set Ratio (e.g. "Republic of Congo" vs "Congo")
@@ -75,10 +70,11 @@ module.exports.evaluateAnswer = function (inputRaw, targetString, synonyms, conf
     inputTokens.forEach(t => { if(targetSet.has(t)) intersect++; });
     const tokenScore = (intersect / targetSet.size) * 100;
 
+    // Config Thresholds (Safe fallback)
     const THRESHOLD = (config && config.FUZZY && config.FUZZY.THRESHOLD_DEFAULT) || 85;
     
-    // Strict match for short answers
-    if (targetClean.length <= 4) {
+    // Special case: Short names (e.g. "Chad", "Fiji") need strict matching
+    if (targetName.length <= 4) {
       return levScore > 95; 
     }
 
@@ -86,6 +82,6 @@ module.exports.evaluateAnswer = function (inputRaw, targetString, synonyms, conf
 
   } catch (err) {
     console.error("Fuzzy Check Error:", err);
-    return false; 
+    return false; // Fail safe
   }
 };

@@ -1,3 +1,4 @@
+// public/lobby.js
 const socket2 = window.socket;
 let CURRENT_LOBBY = null;
 let IS_HOST = false;
@@ -17,9 +18,6 @@ function showJoinCodeInput(show, lobbyName) {
 function calculateMaxQuestions() {
   const checkboxes = document.querySelectorAll(".cont-chk:checked");
   let sum = 0;
-  // Note: This calculates max based on geography. 
-  // For Language mode, the server handles the limit internally (36 max), 
-  // but we keep this UI logic consistent for now.
   if (checkboxes.length === 0) sum = CONTINENT_DATA["all"] || 195;
   else checkboxes.forEach(chk => { sum += (CONTINENT_DATA[chk.value] || 0); });
   return sum;
@@ -91,6 +89,7 @@ function updateLobbyUI(lobby) {
       const statusDiv = document.createElement("div");
       if (lobby.type !== 'single' && lobby.type !== 'public') {
          const isReady = (p.id === lobby.hostId) || lobby.readyState[p.id];
+         // Logic for start button check
          if (!isReady) allReady = false; 
 
          statusDiv.innerHTML = isReady ? "<span style='color:#28a745'>Ready</span>" : "<span style='color:#666'>...</span>";
@@ -115,7 +114,6 @@ function updateLobbyUI(lobby) {
   document.getElementById("host-settings").classList.toggle("hidden", !showSettings);
 
   if (showSettings && lobby.settings) {
-    // [UPDATED] Update the active state for the 5-button grid
     if (lobby.settings.gameType) {
       document.querySelectorAll(".seg-btn").forEach(btn => {
         if (btn.value === lobby.settings.gameType) btn.classList.add("active");
@@ -126,11 +124,12 @@ function updateLobbyUI(lobby) {
     document.getElementById("hints-chk").checked = !!lobby.settings.hints;
   }
 
-  // Start Button Logic
+  // Start Button Logic (Strict Ready Check)
   const startBtn = document.getElementById("start-game-btn");
   const waitMsg = document.getElementById("wait-msg");
 
   if (lobby.type === 'private' || lobby.type === 'public') {
+     // Check if we have enough players and if everyone is ready
      const enoughPlayers = Object.keys(lobby.players).length >= 2;
      const canStart = enoughPlayers && allReady;
      
@@ -143,6 +142,7 @@ function updateLobbyUI(lobby) {
          waitMsg.classList.add("hidden");
      }
   } else {
+     // Single player always ready
      startBtn.disabled = false;
      waitMsg.classList.add("hidden");
   }
@@ -159,7 +159,6 @@ function updateLobbyUI(lobby) {
 document.querySelectorAll(".seg-btn").forEach(btn => {
   btn.onclick = () => {
     if (IS_HOST) {
-      // Handles 'flags', 'maps', 'capitals', 'languages', 'mixed'
       socket2.emit("updateLobbySettings", { lobbyCode: CURRENT_LOBBY.code, settings: { gameType: btn.value }});
     }
   };
@@ -185,6 +184,7 @@ document.querySelectorAll(".cont-chk").forEach((chk) => {
   };
 });
 
+// New Listener for Hints Toggle
 document.getElementById("hints-chk").onchange = (e) => {
     if (!IS_HOST) return;
     socket2.emit("updateLobbySettings", { lobbyCode: CURRENT_LOBBY.code, settings: { hints: e.target.checked }});

@@ -1,16 +1,12 @@
 import { start as startGameEngine } from "./gameEngine.js";
 import countriesRaw from "./data/country.json";
 import synonymsRaw from "./data/synonyms.json";
-import languagesRaw from "./data/languages.json";
 import lobbyNamesRaw from "./data/lobbyNames.json";
 
 const data = {
   countries: {},
-  languages: {},
   synonyms: {},
-  simpleCountryList: [], 
-  simpleCapitalList: [], 
-  simpleLanguageList: [], 
+  simpleCountryList: [], // Optimized list for client autocomplete
   continentCounts: { "all": 0 }
 };
 
@@ -26,20 +22,10 @@ function normalize(str) {
     const normName = normalize(c.name);
     const tokens = normName.split(" ").filter(Boolean);
     const cont = c.continent || "Other";
-    
     data.continentCounts[cont] = (data.continentCounts[cont] || 0) + 1;
     data.continentCounts["all"]++;
-    
     data.countries[c.code] = { ...c, displayName: c.name, normalizedName: normName, tokens: tokens };
     data.simpleCountryList.push(c.name);
-    
-    if (c.capital) {
-      data.simpleCapitalList.push(c.capital);
-    }
-  });
-  languagesRaw.forEach(l => {
-    data.languages[l.id] = l;
-    data.simpleLanguageList.push(l.name);
   });
 })();
 
@@ -98,13 +84,12 @@ export class GameLobby {
 
     ws.send(JSON.stringify({ event: "init", id: playerId, sessionId }));
     
+    // SEND STATIC DATA FOR AUTOCOMPLETE
     ws.send(JSON.stringify({ 
       event: "staticData", 
       payload: { 
         countries: data.simpleCountryList,
-        capitals: data.simpleCapitalList,
-        languages: data.simpleLanguageList,
-        synonyms: synonymsRaw 
+        synonyms: synonymsRaw // Send raw map for client logic
       } 
     }));
     
@@ -116,6 +101,21 @@ export class GameLobby {
       const lobby = this.lobbies[sess.lobbyCode];
       if (lobby) {
         ws.send(JSON.stringify({ event: "lobbyUpdate", payload: lobby }));
+        
+        if (lobby.gameInProgress && lobby.gameState && lobby.gameState.isRoundActive) {
+          const elapsed = (Date.now() - lobby.gameState.startTime) / 1000;
+          const remaining = Math.max(0, lobby.settings.timeLimit - elapsed);
+          
+          ws.send(JSON.stringify({ 
+            event: "questionStart", 
+            payload: {
+              ...lobby.gameState.currentQuestion,
+              timeLimit: lobby.settings.timeLimit,
+              remainingTime: remaining,
+              playerCount: Object.keys(lobby.players).length
+            }
+          }));
+        }
       }
     }
 
@@ -187,8 +187,7 @@ export class GameLobby {
       case "updateLobbySettings": this.updateSettings(code, playerId, payload.settings); break;
       case "startGame": this.startGame(code, playerId); break;
       case "kickPlayer": this.kickPlayer(code, playerId, payload.targetId); break;
-      case "submitScore": this.submitScore(code, playerId, payload); break;
-      case "playerFinished": this.playerFinished(code, playerId); break;
+      case "submitAnswer": this.submitAnswer(code, playerId, payload.answer, ws); break;
       case "voiceSignal": this.handleVoiceSignal(code, playerId, payload); break;
     }
   }
@@ -222,7 +221,7 @@ export class GameLobby {
         questions: 10, 
         timeLimit: 10, 
         gameType: 'mixed',
-        hints: true 
+        hints: true // Default ON
       }
     };
 
@@ -315,11 +314,19 @@ export class GameLobby {
     if (!lobby) return;
     if (!force && lobby.hostId !== playerId) return;
 
+    // STRICT READY CHECK
+    // In Public or Private lobbies, all non-host players must be ready.
+    // If it's a single player game, we ignore this.
     if (lobby.type === 'private' || lobby.type === 'public') {
       const allReady = Object.keys(lobby.players).every(pid => {
+        // Host is implicitly ready by clicking start, everyone else must be checked
         return (pid === lobby.hostId) || lobby.readyState[pid];
       });
-      if (!allReady) return; 
+
+      if (!allReady) {
+        // Optionally send a warning to the host, but the UI handles disabled button.
+        return; 
+      }
     }
 
     lobby.gameInProgress = true;
@@ -334,17 +341,11 @@ export class GameLobby {
     this.broadcastLobbyList();
   }
 
-  submitScore(code, playerId, payload) {
+  submitAnswer(code, playerId, answer, ws) {
     const lobby = this.lobbies[code];
-    if (lobby && lobby.scoreHandler) {
-      lobby.scoreHandler(playerId, payload);
-    }
-  }
-
-  playerFinished(code, playerId) {
-    const lobby = this.lobbies[code];
-    if (lobby && lobby.finishHandler) {
-      lobby.finishHandler(playerId);
+    if (lobby && lobby.currentAnswerHandler) {
+      const isCorrect = lobby.currentAnswerHandler(playerId, answer);
+      ws.send(JSON.stringify({ event: "answerResult", payload: { correct: isCorrect } }));
     }
   }
 

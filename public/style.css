@@ -1,3 +1,4 @@
+/* BASE */
 body { background: #121212; color: #eee; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; text-align: center; margin: 0; overscroll-behavior: none; }
 .screen { display: none; padding: 15px; max-width: 500px; margin: 0 auto; }
 .screen:not(.hidden) { display: block; }
@@ -15,26 +16,12 @@ button:active { transform: scale(0.98); }
 .secondary-btn { background: #444; }
 .secondary-btn:hover { background: #555; }
 
-/* [UPDATED] MODE SELECTION GRID */
-.mode-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr; /* Two columns */
-  gap: 8px;
-  margin-bottom: 15px;
-}
-.seg-btn {
-  background: #222;
-  border: 1px solid #444;
-  border-radius: 6px; /* Rounded individual buttons */
-  font-size: 0.9em;
-  color: #aaa;
-  margin-bottom: 0;
-  padding: 10px;
-}
-.seg-btn.full-width {
-  grid-column: span 2; /* Span full width for Mixed button */
-  font-weight: bold;
-}
+/* SEGMENTED CONTROL */
+.segmented-control { display: flex; width: 100%; margin-bottom: 15px; }
+.seg-btn { flex: 1; background: #222; border: 1px solid #444; margin-bottom: 0; border-radius: 0; font-size: 0.9em; color: #aaa; }
+.seg-btn:first-child { border-top-left-radius: 8px; border-bottom-left-radius: 8px; }
+.seg-btn:last-child { border-top-right-radius: 8px; border-bottom-right-radius: 8px; }
+.seg-btn + .seg-btn { border-left: none; }
 .seg-btn.active { background: #007acc; color: white; border-color: #007acc; }
 
 /* SETTINGS LAYOUT */
@@ -98,18 +85,6 @@ button:active { transform: scale(0.98); }
   box-shadow: none;
   filter: invert(1) brightness(1.2);
   background: transparent !important;
-}
-
-/* [NEW] Text Question Display */
-#text-question-display {
-  color: #fff;
-  font-size: 1.8rem;
-  font-weight: 800;
-  text-align: center;
-  line-height: 1.3;
-  padding: 10px;
-  text-shadow: 0 2px 4px rgba(0,0,0,0.5);
-  animation: popIn 0.3s ease-out;
 }
 
 .loading-hidden { opacity: 0 !important; }
