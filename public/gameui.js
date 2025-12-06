@@ -1,3 +1,4 @@
+// public/gameui.js
 const socket3 = window.socket;
 let MY_SUBMITTED = false;
 let TIMER_INTERVAL = null;
@@ -13,7 +14,7 @@ let GLOBAL_LANGUAGES = [];
 let ALL_SYNONYMS_MAP = {}; 
 
 // Game State
-let CURRENT_QUESTION_TYPE = 'flag'; // 'flag', 'map', 'language'
+let CURRENT_QUESTION_TYPE = 'flag'; 
 
 // Autocomplete State
 let SUGGESTIONS = [];
@@ -60,22 +61,18 @@ function checkLocalAnswer(input, targetRaw, synonyms) {
   if (tgt.length <= 4) return score > 95;
   return score >= 85; 
 }
-// -------------------------------
 
 // --- AUTOCOMPLETE LOGIC ---
 
-// Receive Data on Connection
 socket3.on("staticData", ({ countries, languages, synonyms }) => {
     GLOBAL_COUNTRIES = countries || [];
     GLOBAL_LANGUAGES = languages || [];
     ALL_SYNONYMS_MAP = synonyms || {};
 });
 
-// Settings Update
 socket3.on("gameStarting", (settings) => {
     HINTS_ENABLED = (settings && settings.hints === false) ? false : true;
     
-    // Reset UI
     show("game-screen");
     const img = document.getElementById("flag-img");
     img.src = ""; 
@@ -87,7 +84,6 @@ socket3.on("gameStarting", (settings) => {
     document.getElementById("timer-bar").style.width = "100%";
     document.getElementById("question-counter").innerText = "Get Ready!";
     
-    // Reset Inputs
     const inp = document.getElementById("answer-input");
     inp.value = "";
     inp.className = ""; 
@@ -105,7 +101,6 @@ socket3.on("gameStarting", (settings) => {
     }, 500); 
 });
 
-// Update suggestions based on input
 function updateSuggestions(typed) {
     if (!HINTS_ENABLED || !typed || typed.length < 1) {
         SUGGESTIONS = [];
@@ -115,61 +110,29 @@ function updateSuggestions(typed) {
     }
 
     const search = clean(typed);
-    
-    // 1. Determine which pool to use based on Question Type
-    let targetPool = [];
-    if (CURRENT_QUESTION_TYPE === 'language') {
-        targetPool = GLOBAL_LANGUAGES;
-    } else {
-        // Flags and Maps use Country names
-        targetPool = GLOBAL_COUNTRIES;
-    }
+    let targetPool = (CURRENT_QUESTION_TYPE === 'language') ? GLOBAL_LANGUAGES : GLOBAL_COUNTRIES;
 
-    // 2. Buckets for Sorting
     const primaryMatches = [];
-    const synonymMatches = new Set(); // Use Set for synonyms to avoid duplicates
+    const synonymMatches = new Set(); 
 
-    // 3. Find Primary Matches (Official Names)
     targetPool.forEach(name => {
-        if (clean(name).startsWith(search)) {
-            primaryMatches.push(name);
-        }
+        if (clean(name).startsWith(search)) primaryMatches.push(name);
     });
-    primaryMatches.sort(); // Alphabetical sort for primaries
+    primaryMatches.sort(); 
 
-    // 4. Find Synonym Matches
     Object.keys(ALL_SYNONYMS_MAP).forEach(key => {
         if (clean(key).startsWith(search)) {
-            // CRITICAL: Only add synonym if it maps to a valid answer in the CURRENT POOL
-            // Example: If looking for Flags, 'Francais' (synonym for French) should be ignored
-            // because 'French' is in GLOBAL_LANGUAGES, not GLOBAL_COUNTRIES.
-            
             const officialName = ALL_SYNONYMS_MAP[key];
-            
-            // Check if the official name exists in our target pool
-            if (targetPool.includes(officialName)) {
-                // Also, don't show synonym if the official name is already in primaryMatches
-                // (e.g., don't show "USA" if "United States..." is already matched? 
-                // Actually, user wants distinct options, but Primary First).
-                // Let's just add the synonym string (e.g. "USA").
-                synonymMatches.add(key.toUpperCase());
-            }
+            if (targetPool.includes(officialName)) synonymMatches.add(key.toUpperCase());
         }
     });
 
-    // Convert Set to Array and Sort
     const sortedSynonyms = Array.from(synonymMatches).sort();
-
-    // 5. Merge: Primary Matches FIRST, then Synonyms
     SUGGESTIONS = [...primaryMatches, ...sortedSynonyms];
     SUGGESTION_INDEX = 0;
     
-    // Render first match
-    if (SUGGESTIONS.length > 0) {
-        updateGhostText(SUGGESTIONS[0]);
-    } else {
-        updateGhostText("");
-    }
+    if (SUGGESTIONS.length > 0) updateGhostText(SUGGESTIONS[0]);
+    else updateGhostText("");
 }
 
 function updateGhostText(text) {
@@ -181,9 +144,7 @@ function updateGhostText(text) {
         nextBtn.classList.add("hidden");
         return;
     }
-    
     ghost.innerText = text;
-    // Only show "Next" if there are multiple options
     if (SUGGESTIONS.length > 1) nextBtn.classList.remove("hidden");
     else nextBtn.classList.add("hidden");
 }
@@ -193,8 +154,6 @@ function cycleSuggestion() {
     SUGGESTION_INDEX = (SUGGESTION_INDEX + 1) % SUGGESTIONS.length;
     updateGhostText(SUGGESTIONS[SUGGESTION_INDEX]);
 }
-
-// -------------------------------
 
 function addTickerItem(username, isGood) {
   const container = document.getElementById("feedback-ticker");
@@ -221,7 +180,7 @@ socket3.on("questionStart", ({ index, total, flagPath, timeLimit, playerCount, i
   CURRENT_PLAYER_COUNT = playerCount;
   CURRENT_TARGET = target;
   CURRENT_SYNONYMS = synonyms || [];
-  CURRENT_QUESTION_TYPE = imageType || 'flag'; // Capture Type
+  CURRENT_QUESTION_TYPE = imageType || 'flag'; 
   
   document.getElementById("question-counter").innerText = `Q ${index} / ${total}`;
   const img = document.getElementById("flag-img");
@@ -235,7 +194,6 @@ socket3.on("questionStart", ({ index, total, flagPath, timeLimit, playerCount, i
   document.getElementById("progress-indicator").innerText = `0/${playerCount} Answered`;
   document.getElementById("feedback-ticker").innerHTML = "";
   
-  // Input Reset
   const inp = document.getElementById("answer-input");
   inp.value = "";
   inp.disabled = false;
@@ -243,10 +201,8 @@ socket3.on("questionStart", ({ index, total, flagPath, timeLimit, playerCount, i
   inp.focus();
   document.getElementById("answer-btn").disabled = false;
   
-  // Clear Ghost
   updateGhostText("");
 
-  // Timer
   const bar = document.getElementById("timer-bar");
   if (TIMER_INTERVAL) clearInterval(TIMER_INTERVAL);
   const initialTime = (remainingTime !== undefined) ? remainingTime : timeLimit;
@@ -265,13 +221,11 @@ function submitGuess() {
   
   const inp = document.getElementById("answer-input");
   const ghost = document.getElementById("ghost-overlay");
-  
   let val = inp.value.trim();
   
-  // If Ghost text is visible and valid, prefer it
   if (HINTS_ENABLED && ghost.innerText && ghost.innerText.toLowerCase().startsWith(val.toLowerCase())) {
       val = ghost.innerText;
-      inp.value = val; // visually fill it in
+      inp.value = val;
   }
   
   if (!val) return;
@@ -298,24 +252,13 @@ function submitGuess() {
 
 // EVENT HANDLERS
 const inputEl = document.getElementById("answer-input");
-
-inputEl.oninput = (e) => {
-    updateSuggestions(e.target.value);
-};
-
+inputEl.oninput = (e) => { updateSuggestions(e.target.value); };
 inputEl.onkeydown = (e) => {
   if (e.key === "Enter") submitGuess();
-  if (e.key === "Tab") {
-      e.preventDefault(); // Don't lose focus
-      cycleSuggestion(); // Or select current? User asked for Next button, Tab cycling is a nice bonus.
-  }
+  if (e.key === "Tab") { e.preventDefault(); cycleSuggestion(); }
 };
 
-document.getElementById("next-suggestion-btn").onclick = () => {
-    cycleSuggestion();
-    inputEl.focus(); // Keep focus on input
-};
-
+document.getElementById("next-suggestion-btn").onclick = () => { cycleSuggestion(); inputEl.focus(); };
 document.getElementById("answer-btn").onclick = submitGuess;
 
 socket3.on("answerResult", ({ correct }) => {
@@ -332,9 +275,7 @@ socket3.on("answerResult", ({ correct }) => {
 
 socket3.on("playerUpdate", ({ username, isCorrect, answeredCount, totalPlayers }) => {
   document.getElementById("progress-indicator").innerText = `${answeredCount}/${totalPlayers} Answered`;
-  if (username !== (window.USERNAME || "You")) {
-     addTickerItem(username, isCorrect);
-  }
+  if (username !== (window.USERNAME || "You")) addTickerItem(username, isCorrect);
 });
 
 socket3.on("questionEnd", ({ correctCountry, preload }) => {
@@ -362,7 +303,12 @@ socket3.on("gameOver", ({ leaderboard }) => {
   } else { tbody.innerHTML = "<tr><td colspan='4'>No stats</td></tr>"; }
 });
 
+// [CRITICAL UPDATE] Robust "Play Again" Logic
 document.getElementById("back-to-lobby-btn").onclick = () => {
   show("lobby-room");
   document.getElementById("ready-btn").innerText = "Ready";
+  
+  // Safely get lobby code, falling back to null (Server will handle fallback)
+  const code = window.CURRENT_LOBBY ? window.CURRENT_LOBBY.code : null;
+  socket3.emit("setReady", { lobbyCode: code, ready: true });
 };

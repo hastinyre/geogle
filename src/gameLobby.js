@@ -8,8 +8,8 @@ const data = {
   countries: {},
   languages: [],
   synonyms: {},
-  countryNames: [],  // NEW: specific list for countries
-  languageNames: [], // NEW: specific list for languages
+  countryNames: [],  
+  languageNames: [], 
   continentCounts: { "all": 0 }
 };
 
@@ -22,7 +22,6 @@ function normalize(str) {
     data.synonyms[normalize(key)] = val;
   }
   
-  // Process Countries
   countriesRaw.forEach(c => {
     const normName = normalize(c.name);
     const tokens = normName.split(" ").filter(Boolean);
@@ -30,13 +29,12 @@ function normalize(str) {
     data.continentCounts[cont] = (data.continentCounts[cont] || 0) + 1;
     data.continentCounts["all"]++;
     data.countries[c.code] = { ...c, displayName: c.name, normalizedName: normName, tokens: tokens };
-    data.countryNames.push(c.name); // Add to specific list
+    data.countryNames.push(c.name); 
   });
 
-  // Process Languages
   languagesRaw.forEach(l => {
     data.languages.push(l);
-    data.languageNames.push(l.name); // Add to specific list
+    data.languageNames.push(l.name); 
   });
 })();
 
@@ -95,7 +93,6 @@ export class GameLobby {
 
     ws.send(JSON.stringify({ event: "init", id: playerId, sessionId }));
     
-    // SEND SEPARATE LISTS FOR AUTOCOMPLETE
     ws.send(JSON.stringify({ 
       event: "staticData", 
       payload: { 
@@ -233,7 +230,7 @@ export class GameLobby {
         questions: 10, 
         timeLimit: 10, 
         modes: ['flags', 'maps', 'languages'],
-        hints: true // Default ON
+        hints: true 
       }
     };
 
@@ -306,10 +303,34 @@ export class GameLobby {
   }
 
   setReady(code, playerId, ready) {
-    const lobby = this.lobbies[code];
+    // 1. Try to find lobby by Code
+    let lobby = this.lobbies[code];
+
+    // 2. If code is invalid/null, Search ALL lobbies for this player (Self-Healing)
+    if (!lobby) {
+      for (const l of Object.values(this.lobbies)) {
+        if (l.players[playerId]) {
+          lobby = l;
+          code = l.code; // Update the code so broadcast works
+          break;
+        }
+      }
+    }
+
     if (lobby) {
-      lobby.readyState[playerId] = ready;
+      lobby.readyState[playerId] = !!ready; 
       this.broadcastToLobby(code, "lobbyUpdate", lobby);
+
+      // Auto-start Public Matches logic
+      if (lobby.type === 'public' && !lobby.gameInProgress && Object.keys(lobby.players).length >= 2) {
+         // Use strict boolean true check to ensure no ghosts
+         const playerCount = Object.keys(lobby.players).length;
+         const readyCount = Object.values(lobby.readyState).filter(r => r === true).length;
+         
+         if (readyCount === playerCount) {
+             this.startGame(code, null, true);
+         }
+      }
     }
   }
 
@@ -326,14 +347,11 @@ export class GameLobby {
     if (!lobby) return;
     if (!force && lobby.hostId !== playerId) return;
 
-    if (lobby.type === 'private' || lobby.type === 'public') {
+    if (lobby.type === 'private') {
       const allReady = Object.keys(lobby.players).every(pid => {
         return (pid === lobby.hostId) || lobby.readyState[pid];
       });
-
-      if (!allReady) {
-        return; 
-      }
+      if (!allReady) return; 
     }
 
     lobby.gameInProgress = true;

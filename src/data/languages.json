@@ -34,5 +34,6 @@
   { "id": "portuguese", "name": "Portuguese" },
   { "id": "italian", "name": "Italian" },
   { "id": "swedish", "name": "Swedish" },
-  { "id": "polish", "name": "Polish" }
+  { "id": "polish", "name": "Polish" },
+  { "id": "turkish", "name": "Turkish" }
 ]
