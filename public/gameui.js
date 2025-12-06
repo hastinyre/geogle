@@ -1,4 +1,3 @@
-// public/gameui.js
 const socket3 = window.socket;
 let MY_SUBMITTED = false;
 let TIMER_INTERVAL = null;
@@ -7,8 +6,14 @@ let CURRENT_PLAYER_COUNT = 1;
 // Client Prediction Data
 let CURRENT_TARGET = ""; 
 let CURRENT_SYNONYMS = [];
-let ALL_COUNTRIES_LIST = []; 
+
+// Autocomplete Data
+let GLOBAL_COUNTRIES = [];
+let GLOBAL_LANGUAGES = [];
 let ALL_SYNONYMS_MAP = {}; 
+
+// Game State
+let CURRENT_QUESTION_TYPE = 'flag'; // 'flag', 'map', 'language'
 
 // Autocomplete State
 let SUGGESTIONS = [];
@@ -60,8 +65,9 @@ function checkLocalAnswer(input, targetRaw, synonyms) {
 // --- AUTOCOMPLETE LOGIC ---
 
 // Receive Data on Connection
-socket3.on("staticData", ({ countries, synonyms }) => {
-    ALL_COUNTRIES_LIST = countries || [];
+socket3.on("staticData", ({ countries, languages, synonyms }) => {
+    GLOBAL_COUNTRIES = countries || [];
+    GLOBAL_LANGUAGES = languages || [];
     ALL_SYNONYMS_MAP = synonyms || {};
 });
 
@@ -109,46 +115,53 @@ function updateSuggestions(typed) {
     }
 
     const search = clean(typed);
-    const matches = new Set();
     
-    // 1. Official Names starting with input
-    ALL_COUNTRIES_LIST.forEach(c => {
-        if (clean(c).startsWith(search)) matches.add(c);
-    });
+    // 1. Determine which pool to use based on Question Type
+    let targetPool = [];
+    if (CURRENT_QUESTION_TYPE === 'language') {
+        targetPool = GLOBAL_LANGUAGES;
+    } else {
+        // Flags and Maps use Country names
+        targetPool = GLOBAL_COUNTRIES;
+    }
 
-    // 2. Synonyms starting with input (Deduplicate)
+    // 2. Buckets for Sorting
+    const primaryMatches = [];
+    const synonymMatches = new Set(); // Use Set for synonyms to avoid duplicates
+
+    // 3. Find Primary Matches (Official Names)
+    targetPool.forEach(name => {
+        if (clean(name).startsWith(search)) {
+            primaryMatches.push(name);
+        }
+    });
+    primaryMatches.sort(); // Alphabetical sort for primaries
+
+    // 4. Find Synonym Matches
     Object.keys(ALL_SYNONYMS_MAP).forEach(key => {
         if (clean(key).startsWith(search)) {
-            // "Unique Country Match" Strategy:
-            // If the official name for this synonym is ALREADY matched, skip the synonym
-            // e.g. User types "U". "United States" is matched. We skip "USA" synonym?
-            // User requested: "Next" button cycles. 
-            // Better logic: Show synonym only if it adds a distinct string option.
-            
-            // Actually, simplest is just add the key (e.g. "UAE")
-            // But we don't want "United Arab Emirates" AND "UAE" in the list? 
-            // User said: "Unique Country Match... Never show two options for the same country."
+            // CRITICAL: Only add synonym if it maps to a valid answer in the CURRENT POOL
+            // Example: If looking for Flags, 'Francais' (synonym for French) should be ignored
+            // because 'French' is in GLOBAL_LANGUAGES, not GLOBAL_COUNTRIES.
             
             const officialName = ALL_SYNONYMS_MAP[key];
-            const officialClean = clean(officialName);
             
-            // Check if we already have the official name in our set?
-            // Actually, we store the *DISPLAY STRING* in the Set.
-            
-            let alreadyHasOfficial = false;
-            for (let m of matches) {
-                if (clean(m) === officialClean) alreadyHasOfficial = true;
-            }
-
-            // If we don't have the official name yet (maybe user typed "UA" and official is "United..."), 
-            // then we add the SYNONYM to the list.
-            if (!alreadyHasOfficial) {
-                matches.add(key.toUpperCase()); // Show synonyms in caps usually looks better (UAE, USA)
+            // Check if the official name exists in our target pool
+            if (targetPool.includes(officialName)) {
+                // Also, don't show synonym if the official name is already in primaryMatches
+                // (e.g., don't show "USA" if "United States..." is already matched? 
+                // Actually, user wants distinct options, but Primary First).
+                // Let's just add the synonym string (e.g. "USA").
+                synonymMatches.add(key.toUpperCase());
             }
         }
     });
 
-    SUGGESTIONS = Array.from(matches).sort();
+    // Convert Set to Array and Sort
+    const sortedSynonyms = Array.from(synonymMatches).sort();
+
+    // 5. Merge: Primary Matches FIRST, then Synonyms
+    SUGGESTIONS = [...primaryMatches, ...sortedSynonyms];
     SUGGESTION_INDEX = 0;
     
     // Render first match
@@ -208,6 +221,7 @@ socket3.on("questionStart", ({ index, total, flagPath, timeLimit, playerCount, i
   CURRENT_PLAYER_COUNT = playerCount;
   CURRENT_TARGET = target;
   CURRENT_SYNONYMS = synonyms || [];
+  CURRENT_QUESTION_TYPE = imageType || 'flag'; // Capture Type
   
   document.getElementById("question-counter").innerText = `Q ${index} / ${total}`;
   const img = document.getElementById("flag-img");

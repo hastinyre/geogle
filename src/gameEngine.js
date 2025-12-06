@@ -1,17 +1,55 @@
-// src/gameEngine.js
 const { evaluateAnswer } = require("./fuzzy");
 
-function pickQuestions(countries, continents, count) {
-  const list = Object.values(countries);
-  const filtered = continents && continents.length > 0
-      ? list.filter((c) => continents.includes(c.continent))
-      : list;
+function pickQuestions(data, settings) {
+  const { countries, languages } = data;
+  const { continents, modes, questions: count } = settings;
+  
+  // Default to all modes if none selected (safety check)
+  const activeModes = modes && modes.length > 0 ? modes : ['flags', 'maps', 'languages'];
+  const pool = [];
 
-  for (let i = filtered.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [filtered[i], filtered[j]] = [filtered[j], filtered[i]];
+  // 1. Process Countries (Flags & Maps)
+  // We only filter countries by continent if we are actually using Flags or Maps
+  if (activeModes.includes('flags') || activeModes.includes('maps')) {
+    const countryList = Object.values(countries);
+    const filteredCountries = continents && continents.length > 0
+        ? countryList.filter((c) => continents.includes(c.continent))
+        : countryList;
+
+    filteredCountries.forEach(c => {
+      if (activeModes.includes('flags')) {
+        pool.push({ ...c, type: 'flag', targetName: c.name });
+      }
+      if (activeModes.includes('maps')) {
+        pool.push({ ...c, type: 'map', targetName: c.name });
+      }
+    });
   }
-  return filtered.slice(0, count);
+
+  // 2. Process Languages
+  // Languages are NEVER filtered by continent
+  if (activeModes.includes('languages') && languages) {
+    languages.forEach(l => {
+      // Randomly pick variant 1, 2, or 3
+      const variant = Math.floor(Math.random() * 3) + 1;
+      pool.push({
+        ...l,
+        type: 'language',
+        targetName: l.name,
+        code: l.id, // Use ID for filename construction
+        variant: variant
+      });
+    });
+  }
+
+  // 3. Shuffle Pool
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+
+  // 4. Slice to desired count
+  return pool.slice(0, count);
 }
 
 function start(broadcast, lobby, { config, data }) {
@@ -21,12 +59,11 @@ function start(broadcast, lobby, { config, data }) {
     gameStats[pid] = { points: 0, totalTime: 0, username: players[pid].username || "Guest" };
   });
 
-  const questions = pickQuestions(data.countries, lobby.settings.continents, lobby.settings.questions);
+  const questions = pickQuestions(data, lobby.settings);
   let currentIndex = 0;
   let currentTimer = null;
   let isRoundActive = false;
-  let nextRoundInfo = null;
-
+  
   // Initialize Game State for Snapshots
   lobby.gameState = {
     active: true,
@@ -37,11 +74,11 @@ function start(broadcast, lobby, { config, data }) {
     timeLimit: lobby.settings.timeLimit
   };
 
-  function determineQuestionType() {
-    const type = lobby.settings.gameType || 'mixed';
-    if (type === 'maps') return true; 
-    if (type === 'flags') return false; 
-    return Math.random() > 0.5; 
+  function getImagePath(q) {
+    if (q.type === 'map') return `maps/${q.code}.svg`;
+    if (q.type === 'language') return `languages/${q.code}_${q.variant}.png`;
+    // Default to flag
+    return q.flag_4x3 || `flags/4x3/${q.code}.svg`;
   }
 
   function sendQuestion() {
@@ -53,20 +90,17 @@ function start(broadcast, lobby, { config, data }) {
     const q = questions[currentIndex];
     const answersThisRound = new Set(); 
     isRoundActive = true;
-
-    const useMap = nextRoundInfo ? nextRoundInfo.useMap : determineQuestionType();
-    nextRoundInfo = null; 
     
-    const imagePath = useMap ? `maps/${q.code}.svg` : (q.flag_4x3 || `flags/4x3/${q.code}.svg`);
-    const relevantSynonyms = Object.keys(data.synonyms).filter(key => data.synonyms[key] === q.name);
+    const imagePath = getImagePath(q);
+    const relevantSynonyms = Object.keys(data.synonyms).filter(key => data.synonyms[key] === q.targetName);
 
     // [SNAPSHOT] Update Lobby State
     lobby.gameState.currentQuestion = {
       index: currentIndex + 1,
       total: questions.length,
       flagPath: imagePath,
-      imageType: useMap ? 'map' : 'flag',
-      target: q.name,
+      imageType: q.type, // 'flag', 'map', or 'language'
+      target: q.targetName,
       synonyms: relevantSynonyms
     };
     lobby.gameState.startTime = Date.now();
@@ -83,21 +117,18 @@ function start(broadcast, lobby, { config, data }) {
     function finishQuestion() {
       if (!isRoundActive) return;
       isRoundActive = false;
-      lobby.gameState.isRoundActive = false; // Mark round as done in state
+      lobby.gameState.isRoundActive = false; 
       
       clearTimeout(currentTimer);
 
       let preloadData = null;
       if (currentIndex + 1 < questions.length) {
         const nextQ = questions[currentIndex + 1];
-        const nextUseMap = determineQuestionType();
-        nextRoundInfo = { useMap: nextUseMap };
-        const nextPath = nextUseMap ? `maps/${nextQ.code}.svg` : (nextQ.flag_4x3 || `flags/4x3/${nextQ.code}.svg`);
-        preloadData = { url: nextPath };
+        preloadData = { url: getImagePath(nextQ) };
       }
 
       broadcast("questionEnd", { 
-        correctCountry: q.name,
+        correctCountry: q.targetName,
         preload: preloadData 
       });
 
@@ -110,7 +141,10 @@ function start(broadcast, lobby, { config, data }) {
         if (answersThisRound.has(pid)) return false;
 
         const timeTaken = Date.now() - startTime;
-        const isCorrect = evaluateAnswer(answer, q, data.synonyms, config);
+        
+        // Construct a temporary object compatible with evaluateAnswer
+        const evalObj = { name: q.targetName, tokens: q.tokens }; // tokens might need generation if not present for languages
+        const isCorrect = evaluateAnswer(answer, evalObj, data.synonyms, config);
 
         answersThisRound.add(pid);
         if (isCorrect) {
@@ -137,7 +171,7 @@ function start(broadcast, lobby, { config, data }) {
 
   function endGame() {
     lobby.gameInProgress = false;
-    lobby.gameState = null; // Clear state
+    lobby.gameState = null; 
     lobby.currentAnswerHandler = null;
     Object.keys(lobby.players).forEach(pid => lobby.readyState[pid] = false);
     
@@ -153,11 +187,7 @@ function start(broadcast, lobby, { config, data }) {
   // Preload Q1 Logic
   if (questions.length > 0) {
     const firstQ = questions[0];
-    const firstUseMap = determineQuestionType();
-    nextRoundInfo = { useMap: firstUseMap };
-    const firstPath = firstUseMap ? `maps/${firstQ.code}.svg` : (firstQ.flag_4x3 || `flags/4x3/${firstQ.code}.svg`);
-    
-    broadcast("gamePreload", { url: firstPath });
+    broadcast("gamePreload", { url: getImagePath(firstQ) });
     setTimeout(() => {
         if (lobby.gameInProgress) sendQuestion();
     }, 1500);

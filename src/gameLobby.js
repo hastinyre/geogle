@@ -1,12 +1,15 @@
 import { start as startGameEngine } from "./gameEngine.js";
 import countriesRaw from "./data/country.json";
+import languagesRaw from "./data/languages.json";
 import synonymsRaw from "./data/synonyms.json";
 import lobbyNamesRaw from "./data/lobbyNames.json";
 
 const data = {
   countries: {},
+  languages: [],
   synonyms: {},
-  simpleCountryList: [], // Optimized list for client autocomplete
+  countryNames: [],  // NEW: specific list for countries
+  languageNames: [], // NEW: specific list for languages
   continentCounts: { "all": 0 }
 };
 
@@ -18,6 +21,8 @@ function normalize(str) {
   for (const [key, val] of Object.entries(synonymsRaw)) {
     data.synonyms[normalize(key)] = val;
   }
+  
+  // Process Countries
   countriesRaw.forEach(c => {
     const normName = normalize(c.name);
     const tokens = normName.split(" ").filter(Boolean);
@@ -25,7 +30,13 @@ function normalize(str) {
     data.continentCounts[cont] = (data.continentCounts[cont] || 0) + 1;
     data.continentCounts["all"]++;
     data.countries[c.code] = { ...c, displayName: c.name, normalizedName: normName, tokens: tokens };
-    data.simpleCountryList.push(c.name);
+    data.countryNames.push(c.name); // Add to specific list
+  });
+
+  // Process Languages
+  languagesRaw.forEach(l => {
+    data.languages.push(l);
+    data.languageNames.push(l.name); // Add to specific list
   });
 })();
 
@@ -84,12 +95,13 @@ export class GameLobby {
 
     ws.send(JSON.stringify({ event: "init", id: playerId, sessionId }));
     
-    // SEND STATIC DATA FOR AUTOCOMPLETE
+    // SEND SEPARATE LISTS FOR AUTOCOMPLETE
     ws.send(JSON.stringify({ 
       event: "staticData", 
       payload: { 
-        countries: data.simpleCountryList,
-        synonyms: synonymsRaw // Send raw map for client logic
+        countries: data.countryNames,
+        languages: data.languageNames,
+        synonyms: synonymsRaw 
       } 
     }));
     
@@ -220,7 +232,7 @@ export class GameLobby {
         continents: [], 
         questions: 10, 
         timeLimit: 10, 
-        gameType: 'mixed',
+        modes: ['flags', 'maps', 'languages'],
         hints: true // Default ON
       }
     };
@@ -314,17 +326,12 @@ export class GameLobby {
     if (!lobby) return;
     if (!force && lobby.hostId !== playerId) return;
 
-    // STRICT READY CHECK
-    // In Public or Private lobbies, all non-host players must be ready.
-    // If it's a single player game, we ignore this.
     if (lobby.type === 'private' || lobby.type === 'public') {
       const allReady = Object.keys(lobby.players).every(pid => {
-        // Host is implicitly ready by clicking start, everyone else must be checked
         return (pid === lobby.hostId) || lobby.readyState[pid];
       });
 
       if (!allReady) {
-        // Optionally send a warning to the host, but the UI handles disabled button.
         return; 
       }
     }

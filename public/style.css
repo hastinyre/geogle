@@ -1,4 +1,3 @@
-/* BASE */
 body { background: #121212; color: #eee; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; text-align: center; margin: 0; overscroll-behavior: none; }
 .screen { display: none; padding: 15px; max-width: 500px; margin: 0 auto; }
 .screen:not(.hidden) { display: block; }
@@ -16,13 +15,7 @@ button:active { transform: scale(0.98); }
 .secondary-btn { background: #444; }
 .secondary-btn:hover { background: #555; }
 
-/* SEGMENTED CONTROL */
-.segmented-control { display: flex; width: 100%; margin-bottom: 15px; }
-.seg-btn { flex: 1; background: #222; border: 1px solid #444; margin-bottom: 0; border-radius: 0; font-size: 0.9em; color: #aaa; }
-.seg-btn:first-child { border-top-left-radius: 8px; border-bottom-left-radius: 8px; }
-.seg-btn:last-child { border-top-right-radius: 8px; border-bottom-right-radius: 8px; }
-.seg-btn + .seg-btn { border-left: none; }
-.seg-btn.active { background: #007acc; color: white; border-color: #007acc; }
+/* SEGMENTED CONTROL REMOVED, REPLACED BY CHECKBOX GRID BELOW */
 
 /* SETTINGS LAYOUT */
 .settings-row { display: flex; gap: 10px; margin-bottom: 15px; }
@@ -32,9 +25,21 @@ button:active { transform: scale(0.98); }
 .input-group input { border-top-right-radius: 0; border-bottom-right-radius: 0; margin-bottom: 0; }
 .max-btn { width: auto !important; border-top-left-radius: 0; border-bottom-left-radius: 0; margin-bottom: 0; padding: 0 15px; font-size: 0.9em; background: #444; }
 .max-btn.active { background: #007acc; color: white; }
+
+/* Checkbox Groups */
 .chk-group { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; text-align: left; margin-bottom: 15px; }
 .chk-group label { display: block; font-size: 0.9em; background: #222; padding: 8px; border-radius: 4px; }
+
+/* Specific style for Modes (3 columns if possible, or keep 2) */
+.mode-chk-group { grid-template-columns: 1fr 1fr 1fr; margin-bottom: 20px; }
+.mode-chk-group label { text-align: center; font-size: 0.85em; }
+
+.setting-label-small { display: block; text-align: left; color: #aaa; font-size: 0.8em; margin-bottom: 5px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; }
+
 .setting-single { text-align: left; margin-bottom: 15px; background: #222; padding: 10px; border-radius: 4px; border: 1px solid #444; font-size: 0.9em; }
+
+/* Disabled Area (for Continents when Language only) */
+.disabled-area { opacity: 0.3; pointer-events: none; filter: grayscale(100%); transition: opacity 0.3s; }
 
 /* LOBBY ITEM */
 .lobby-item { background: #1f1f1f; border: 1px solid #333; padding: 15px; margin-bottom: 10px; border-radius: 8px; text-align: left; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }

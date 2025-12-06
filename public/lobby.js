@@ -1,4 +1,3 @@
-// public/lobby.js
 const socket2 = window.socket;
 let CURRENT_LOBBY = null;
 let IS_HOST = false;
@@ -46,7 +45,6 @@ function updateLobbyUI(lobby) {
   const codeSpan = document.getElementById("lobby-room-code");
   const quitBtn = document.getElementById("hud-quit-btn");
   
-  // Single Player Mode
   if (lobby.type === 'single') {
     title.innerText = "Single Player";
     statusText.innerText = "Practice Mode";
@@ -89,9 +87,7 @@ function updateLobbyUI(lobby) {
       const statusDiv = document.createElement("div");
       if (lobby.type !== 'single' && lobby.type !== 'public') {
          const isReady = (p.id === lobby.hostId) || lobby.readyState[p.id];
-         // Logic for start button check
          if (!isReady) allReady = false; 
-
          statusDiv.innerHTML = isReady ? "<span style='color:#28a745'>Ready</span>" : "<span style='color:#666'>...</span>";
       }
       
@@ -114,22 +110,38 @@ function updateLobbyUI(lobby) {
   document.getElementById("host-settings").classList.toggle("hidden", !showSettings);
 
   if (showSettings && lobby.settings) {
-    if (lobby.settings.gameType) {
-      document.querySelectorAll(".seg-btn").forEach(btn => {
-        if (btn.value === lobby.settings.gameType) btn.classList.add("active");
-        else btn.classList.remove("active");
+    // 1. Update Mode Checkboxes
+    if (lobby.settings.modes) {
+      document.querySelectorAll(".mode-chk").forEach(chk => {
+        chk.checked = lobby.settings.modes.includes(chk.value);
       });
+      
+      // 2. Logic to Grey Out Continents
+      const modes = lobby.settings.modes;
+      const continentSection = document.getElementById("continents-section");
+      
+      // If we have flags or maps, continents are relevant.
+      // If ONLY languages (or nothing), continents are not relevant.
+      const hasGeo = modes.includes('flags') || modes.includes('maps');
+      
+      if (hasGeo) {
+        continentSection.classList.remove("disabled-area");
+        document.querySelectorAll(".cont-chk").forEach(c => c.disabled = false);
+      } else {
+        continentSection.classList.add("disabled-area");
+        document.querySelectorAll(".cont-chk").forEach(c => c.disabled = true);
+      }
     }
-    // Update Checkbox State
+
+    // 3. Update Checkbox State for Hints
     document.getElementById("hints-chk").checked = !!lobby.settings.hints;
   }
 
-  // Start Button Logic (Strict Ready Check)
+  // Start Button Logic
   const startBtn = document.getElementById("start-game-btn");
   const waitMsg = document.getElementById("wait-msg");
 
   if (lobby.type === 'private' || lobby.type === 'public') {
-     // Check if we have enough players and if everyone is ready
      const enoughPlayers = Object.keys(lobby.players).length >= 2;
      const canStart = enoughPlayers && allReady;
      
@@ -142,7 +154,6 @@ function updateLobbyUI(lobby) {
          waitMsg.classList.add("hidden");
      }
   } else {
-     // Single player always ready
      startBtn.disabled = false;
      waitMsg.classList.add("hidden");
   }
@@ -156,11 +167,21 @@ function updateLobbyUI(lobby) {
 
 // --- LISTENERS ---
 
-document.querySelectorAll(".seg-btn").forEach(btn => {
-  btn.onclick = () => {
-    if (IS_HOST) {
-      socket2.emit("updateLobbySettings", { lobbyCode: CURRENT_LOBBY.code, settings: { gameType: btn.value }});
+// Listener for Mode Checkboxes
+document.querySelectorAll(".mode-chk").forEach(chk => {
+  chk.onchange = () => {
+    if (!IS_HOST) return;
+    
+    // Get all currently checked modes
+    const allChecked = [...document.querySelectorAll(".mode-chk:checked")].map(x => x.value);
+    
+    // Prevent unchecking the last one (keep at least one active)
+    if (allChecked.length === 0) {
+      chk.checked = true; // Revert
+      return;
     }
+    
+    socket2.emit("updateLobbySettings", { lobbyCode: CURRENT_LOBBY.code, settings: { modes: allChecked }});
   };
 });
 
@@ -184,7 +205,6 @@ document.querySelectorAll(".cont-chk").forEach((chk) => {
   };
 });
 
-// New Listener for Hints Toggle
 document.getElementById("hints-chk").onchange = (e) => {
     if (!IS_HOST) return;
     socket2.emit("updateLobbySettings", { lobbyCode: CURRENT_LOBBY.code, settings: { hints: e.target.checked }});
@@ -241,7 +261,6 @@ document.getElementById("hud-quit-btn").onclick = () => {
   CURRENT_LOBBY = null;
   show("mode-screen");
 };
-
 
 document.getElementById("back-to-mode-btn").onclick = () => show("mode-screen");
 document.getElementById("create-lobby-btn").onclick = () => socket2.emit("createLobby", { username: window.USERNAME });
