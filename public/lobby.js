@@ -1,3 +1,4 @@
+// public/lobby.js
 const socket2 = window.socket;
 let CURRENT_LOBBY = null;
 let IS_HOST = false;
@@ -109,6 +110,8 @@ function updateLobbyUI(lobby) {
   const showSettings = IS_HOST && (lobby.type === 'private' || lobby.type === 'single');
   document.getElementById("host-settings").classList.toggle("hidden", !showSettings);
 
+  let hasValidModes = true;
+
   if (showSettings && lobby.settings) {
     // 1. Update Mode Checkboxes
     if (lobby.settings.modes) {
@@ -116,12 +119,12 @@ function updateLobbyUI(lobby) {
         chk.checked = lobby.settings.modes.includes(chk.value);
       });
       
+      hasValidModes = lobby.settings.modes.length > 0;
+
       // 2. Logic to Grey Out Continents
       const modes = lobby.settings.modes;
       const continentSection = document.getElementById("continents-section");
       
-      // If we have flags or maps, continents are relevant.
-      // If ONLY languages (or nothing), continents are not relevant.
       const hasGeo = modes.includes('flags') || modes.includes('maps');
       
       if (hasGeo) {
@@ -140,21 +143,37 @@ function updateLobbyUI(lobby) {
   // Start Button Logic
   const startBtn = document.getElementById("start-game-btn");
   const waitMsg = document.getElementById("wait-msg");
+  const errorMsg = document.getElementById("mode-error-msg");
 
   if (lobby.type === 'private' || lobby.type === 'public') {
      const enoughPlayers = Object.keys(lobby.players).length >= 2;
-     const canStart = enoughPlayers && allReady;
+     const canStart = enoughPlayers && allReady && hasValidModes;
      
      startBtn.disabled = !canStart;
-     if (!canStart) {
-         if (!enoughPlayers) waitMsg.innerText = "Need at least 2 players";
-         else waitMsg.innerText = "Waiting for players to ready up...";
-         waitMsg.classList.remove("hidden");
+     
+     // Determine Message
+     if (!hasValidModes) {
+       errorMsg.classList.remove("hidden");
+       waitMsg.classList.add("hidden");
      } else {
-         waitMsg.classList.add("hidden");
+       errorMsg.classList.add("hidden");
+       if (!canStart) {
+           if (!enoughPlayers) waitMsg.innerText = "Need at least 2 players";
+           else waitMsg.innerText = "Waiting for players to ready up...";
+           waitMsg.classList.remove("hidden");
+       } else {
+           waitMsg.classList.add("hidden");
+       }
      }
   } else {
-     startBtn.disabled = false;
+     // Single Player
+     if (!hasValidModes) {
+       startBtn.disabled = true;
+       errorMsg.classList.remove("hidden");
+     } else {
+       startBtn.disabled = false;
+       errorMsg.classList.add("hidden");
+     }
      waitMsg.classList.add("hidden");
   }
 
@@ -175,11 +194,8 @@ document.querySelectorAll(".mode-chk").forEach(chk => {
     // Get all currently checked modes
     const allChecked = [...document.querySelectorAll(".mode-chk:checked")].map(x => x.value);
     
-    // Prevent unchecking the last one (keep at least one active)
-    if (allChecked.length === 0) {
-      chk.checked = true; // Revert
-      return;
-    }
+    // We allow unchecking everything (0 items)
+    // The UI will handle disabling the start button
     
     socket2.emit("updateLobbySettings", { lobbyCode: CURRENT_LOBBY.code, settings: { modes: allChecked }});
   };

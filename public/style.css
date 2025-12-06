@@ -1,3 +1,4 @@
+/* BASE */
 body { background: #121212; color: #eee; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; text-align: center; margin: 0; overscroll-behavior: none; }
 .screen { display: none; padding: 15px; max-width: 500px; margin: 0 auto; }
 .screen:not(.hidden) { display: block; }
@@ -15,8 +16,6 @@ button:active { transform: scale(0.98); }
 .secondary-btn { background: #444; }
 .secondary-btn:hover { background: #555; }
 
-/* SEGMENTED CONTROL REMOVED, REPLACED BY CHECKBOX GRID BELOW */
-
 /* SETTINGS LAYOUT */
 .settings-row { display: flex; gap: 10px; margin-bottom: 15px; }
 .input-wrapper { flex: 1; text-align: left; }
@@ -30,7 +29,7 @@ button:active { transform: scale(0.98); }
 .chk-group { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; text-align: left; margin-bottom: 15px; }
 .chk-group label { display: block; font-size: 0.9em; background: #222; padding: 8px; border-radius: 4px; }
 
-/* Specific style for Modes (3 columns if possible, or keep 2) */
+/* Specific style for Modes */
 .mode-chk-group { grid-template-columns: 1fr 1fr 1fr; margin-bottom: 20px; }
 .mode-chk-group label { text-align: center; font-size: 0.85em; }
 
@@ -40,6 +39,23 @@ button:active { transform: scale(0.98); }
 
 /* Disabled Area (for Continents when Language only) */
 .disabled-area { opacity: 0.3; pointer-events: none; filter: grayscale(100%); transition: opacity 0.3s; }
+
+/* CREATOR CONTACT */
+.creator-contact {
+    margin-top: 30px;
+    font-size: 0.75rem;
+    color: rgba(255, 255, 255, 0.3);
+    letter-spacing: 0.5px;
+}
+
+/* ERROR MESSAGE (No mode selected) */
+.error-text {
+    color: #ff5c5c;
+    font-size: 0.85rem;
+    margin-top: 8px;
+    font-weight: bold;
+    animation: shake 0.3s;
+}
 
 /* LOBBY ITEM */
 .lobby-item { background: #1f1f1f; border: 1px solid #333; padding: 15px; margin-bottom: 10px; border-radius: 8px; text-align: left; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }

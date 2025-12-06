@@ -515,6 +515,7 @@
   {
     "capital": "Palikir",
     "code": "fm",
+    "noMap": true,
     "continent": "Oceania",
     "flag_1x1": "flags/1x1/fm.svg",
     "flag_4x3": "flags/4x3/fm.svg",
@@ -965,6 +966,7 @@
   {
     "capital": "Majuro",
     "code": "mh",
+    "noMap": true,
     "continent": "Oceania",
     "flag_1x1": "flags/1x1/mh.svg",
     "flag_4x3": "flags/4x3/mh.svg",
@@ -1487,6 +1489,7 @@
   {
     "capital": "Ramallah",
     "code": "ps",
+    "noMap": true,
     "continent": "Asia",
     "flag_1x1": "flags/1x1/ps.svg",
     "flag_4x3": "flags/4x3/ps.svg",
@@ -1631,6 +1634,7 @@
   {
     "capital": "Funafuti",
     "code": "tv",
+    "noMap": true,
     "continent": "Oceania",
     "flag_1x1": "flags/1x1/tv.svg",
     "flag_4x3": "flags/4x3/tv.svg",

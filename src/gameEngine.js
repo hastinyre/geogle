@@ -1,55 +1,89 @@
+// src/gameEngine.js
 const { evaluateAnswer } = require("./fuzzy");
 
 function pickQuestions(data, settings) {
   const { countries, languages } = data;
-  const { continents, modes, questions: count } = settings;
-  
-  // Default to all modes if none selected (safety check)
+  const { continents, modes, questions: totalCount } = settings;
+
+  // Default to all modes if none selected (Safety fallback)
   const activeModes = modes && modes.length > 0 ? modes : ['flags', 'maps', 'languages'];
-  const pool = [];
+  
+  // 1. Calculate Quotas (Fair Split)
+  const modeCount = activeModes.length;
+  const baseQuota = Math.floor(totalCount / modeCount);
+  const remainder = totalCount % modeCount;
 
-  // 1. Process Countries (Flags & Maps)
-  // We only filter countries by continent if we are actually using Flags or Maps
-  if (activeModes.includes('flags') || activeModes.includes('maps')) {
-    const countryList = Object.values(countries);
-    const filteredCountries = continents && continents.length > 0
-        ? countryList.filter((c) => continents.includes(c.continent))
-        : countryList;
-
-    filteredCountries.forEach(c => {
-      if (activeModes.includes('flags')) {
-        pool.push({ ...c, type: 'flag', targetName: c.name });
-      }
-      if (activeModes.includes('maps')) {
-        pool.push({ ...c, type: 'map', targetName: c.name });
-      }
-    });
-  }
-
-  // 2. Process Languages
-  // Languages are NEVER filtered by continent
-  if (activeModes.includes('languages') && languages) {
-    languages.forEach(l => {
-      // Randomly pick variant 1, 2, or 3
-      const variant = Math.floor(Math.random() * 3) + 1;
-      pool.push({
-        ...l,
-        type: 'language',
-        targetName: l.name,
-        code: l.id, // Use ID for filename construction
-        variant: variant
-      });
-    });
-  }
-
-  // 3. Shuffle Pool
-  for (let i = pool.length - 1; i > 0; i--) {
+  // Shuffle modes to randomly assign the remainder questions
+  const shuffledModes = [...activeModes];
+  for (let i = shuffledModes.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
-    [pool[i], pool[j]] = [pool[j], pool[i]];
+    [shuffledModes[i], shuffledModes[j]] = [shuffledModes[j], shuffledModes[i]];
   }
 
-  // 4. Slice to desired count
-  return pool.slice(0, count);
+  const finalQuestions = [];
+
+  // 2. Process each mode with its specific quota
+  shuffledModes.forEach((mode, index) => {
+    // Determine exact number of questions for this mode
+    // The first 'remainder' number of modes get +1 question
+    let countForThisMode = baseQuota;
+    if (index < remainder) {
+      countForThisMode++;
+    }
+
+    if (countForThisMode === 0) return;
+
+    const modePool = [];
+
+    if (mode === 'flags' || mode === 'maps') {
+      // Filter Countries by Continent
+      const countryList = Object.values(countries);
+      const filtered = continents && continents.length > 0
+          ? countryList.filter((c) => continents.includes(c.continent))
+          : countryList;
+
+      filtered.forEach(c => {
+        // [NEW] Safety Check: Skip countries marked with noMap only in Maps mode
+        if (mode === 'maps' && c.noMap) return;
+
+        modePool.push({
+          ...c,
+          type: mode === 'flags' ? 'flag' : 'map',
+          targetName: c.name
+        });
+      });
+    } 
+    else if (mode === 'languages') {
+      // Use All Languages (Languages ignore continent filters)
+      languages.forEach(l => {
+        const variant = Math.floor(Math.random() * 3) + 1; // Pick 1, 2, or 3
+        modePool.push({
+          ...l,
+          type: 'language',
+          targetName: l.name,
+          code: l.id,
+          variant: variant
+        });
+      });
+    }
+
+    // Shuffle the specific mode pool
+    for (let i = modePool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [modePool[i], modePool[j]] = [modePool[j], modePool[i]];
+    }
+
+    // Take the calculated quota
+    finalQuestions.push(...modePool.slice(0, countForThisMode));
+  });
+
+  // 3. Final Shuffle (Mix the types together so they aren't grouped)
+  for (let i = finalQuestions.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [finalQuestions[i], finalQuestions[j]] = [finalQuestions[j], finalQuestions[i]];
+  }
+
+  return finalQuestions;
 }
 
 function start(broadcast, lobby, { config, data }) {
@@ -143,7 +177,8 @@ function start(broadcast, lobby, { config, data }) {
         const timeTaken = Date.now() - startTime;
         
         // Construct a temporary object compatible with evaluateAnswer
-        const evalObj = { name: q.targetName, tokens: q.tokens }; // tokens might need generation if not present for languages
+        // Languages might not have pre-calculated tokens, so we rely on simple evaluation
+        const evalObj = { name: q.targetName, tokens: q.tokens }; 
         const isCorrect = evaluateAnswer(answer, evalObj, data.synonyms, config);
 
         answersThisRound.add(pid);
