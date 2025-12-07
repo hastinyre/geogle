@@ -261,6 +261,10 @@ th { background: #2a2a2a; color: #aaa; font-size: 0.9em; text-transform: upperca
   font-size: 0.9em;
   font-weight: bold;
   border: 1px solid rgba(255, 255, 255, 0.1);
+  cursor: pointer; /* [NEW] Clickable */
+}
+#hud-username:hover {
+  background: rgba(255, 255, 255, 0.2);
 }
 
 #hud-quit-btn {
@@ -270,6 +274,42 @@ th { background: #2a2a2a; color: #aaa; font-size: 0.9em; text-transform: upperca
   font-size: 0.85em;
   margin-bottom: 0;
   border-radius: 20px;
+}
+
+/* MODAL STYLES (NEW) */
+#name-modal {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.8);
+  z-index: 10000;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.modal-content {
+  background: #222;
+  padding: 20px;
+  border-radius: 12px;
+  width: 90%;
+  max-width: 350px;
+  border: 1px solid #444;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+  text-align: center;
+}
+
+.modal-content h3 {
+  margin-top: 0;
+  color: #ffc107;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+}
+.modal-actions button {
+  margin-bottom: 0;
 }
 
 /* MOBILE OPTIMIZATION */

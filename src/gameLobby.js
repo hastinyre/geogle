@@ -198,6 +198,8 @@ export class GameLobby {
       case "kickPlayer": this.kickPlayer(code, playerId, payload.targetId); break;
       case "submitAnswer": this.submitAnswer(code, playerId, payload.answer, ws); break;
       case "voiceSignal": this.handleVoiceSignal(code, playerId, payload); break;
+      // [NEW] Handle Name Change
+      case "changeName": this.changeName(ws, playerId, payload.username); break;
     }
   }
 
@@ -210,6 +212,25 @@ export class GameLobby {
         ws.send(JSON.stringify({ event: "voiceSignal", payload: { senderId, signal } }));
         break;
       }
+    }
+  }
+
+  // [NEW] Change Name Implementation
+  changeName(ws, playerId, newName) {
+    if (!newName || typeof newName !== 'string' || newName.length > 15) return;
+    
+    // 1. Check if user is in a lobby
+    const sess = this.sessions.get(ws);
+    
+    if (sess && sess.lobbyCode) {
+        const lobby = this.lobbies[sess.lobbyCode];
+        if (lobby && lobby.players[playerId]) {
+            // Update name in lobby state
+            lobby.players[playerId].username = newName;
+            
+            // Broadcast immediate update to everyone in the lobby
+            this.broadcastToLobby(sess.lobbyCode, "lobbyUpdate", lobby);
+        }
     }
   }
 

@@ -42,7 +42,7 @@ if (USERNAME) {
   show("username-screen");
 }
 
-// USERNAME
+// USERNAME INITIAL SETUP
 document.getElementById("username-btn").onclick = () => {
   const name = document.getElementById("username-input").value.trim();
   if (!name) return;
@@ -51,6 +51,41 @@ document.getElementById("username-btn").onclick = () => {
   localStorage.setItem("geogle_username", USERNAME); 
   updateHUD();
   show("mode-screen");
+};
+
+// [NEW] NAME CHANGE LOGIC
+const nameModal = document.getElementById("name-modal");
+const hudNameEl = document.getElementById("hud-username");
+
+hudNameEl.onclick = () => {
+    // RESTRICTION: Do not allow name change in Gameplay or Leaderboard
+    const isGameActive = !document.getElementById("game-screen").classList.contains("hidden");
+    const isGameOver = !document.getElementById("game-over-screen").classList.contains("hidden");
+    
+    if (isGameActive || isGameOver) return;
+
+    document.getElementById("new-name-input").value = window.USERNAME;
+    nameModal.classList.remove("hidden");
+    document.getElementById("new-name-input").focus();
+};
+
+document.getElementById("cancel-name-btn").onclick = () => {
+    nameModal.classList.add("hidden");
+};
+
+document.getElementById("confirm-name-btn").onclick = () => {
+    const newName = document.getElementById("new-name-input").value.trim();
+    if (newName && newName.length > 0) {
+        // 1. Update Local State
+        USERNAME = newName;
+        window.USERNAME = newName;
+        localStorage.setItem("geogle_username", newName);
+        updateHUD();
+
+        // 2. Notify Server (Update Lobby List Immediately)
+        socket.emit("changeName", { username: newName });
+    }
+    nameModal.classList.add("hidden");
 };
 
 // --- 1. PUBLIC (Matchmaking) ---
@@ -86,13 +121,10 @@ const iceServers = {
 };
 
 // --- Helper: Plug Mic into a Connection ---
-// This fixes the "Reload Glitch" by ensuring active mics are 
-// attached to new connections immediately.
 function reattachLocalStream(pc) {
   if (localStream && isMicOn) {
     const audioTrack = localStream.getAudioTracks()[0];
     if (audioTrack) {
-      // Find the audio sender (whether silent or null) and plug the track in
       const sender = pc.getSenders().find(s => s.track && s.track.kind === 'audio' || (!s.track));
       if (sender) {
         sender.replaceTrack(audioTrack).catch(e => console.error("Voice: Auto-Reattach Error", e));
@@ -157,7 +189,6 @@ function createPeer(targetId, initiator) {
 
   if (initiator) {
     pc.addTransceiver('audio', { direction: 'sendrecv' });
-    // [FIX] If we initiated and our Mic is ON, plug it in NOW.
     reattachLocalStream(pc);
   }
 
@@ -222,14 +253,12 @@ socket.on("voiceSignal", async ({ senderId, signal }) => {
       console.log(`Voice: Received Offer from ${senderId}`);
       await pc.setRemoteDescription(new RTCSessionDescription(signal));
       
-      // Ensure Transceiver direction if we are Responder
       pc.getTransceivers().forEach(t => {
         if (t.receiver.track.kind === 'audio') {
           t.direction = 'sendrecv';
         }
       });
 
-      // [FIX] If we are Responding and Mic is ON, plug it in NOW.
       reattachLocalStream(pc);
 
       if (iceQueues[senderId]) {
@@ -271,7 +300,6 @@ socket.on("playerRejoined", ({ playerId }) => {
     if (el) el.remove();
   }
 
-  // Larger ID calls Smaller ID logic
   if (myId && myId > playerId) {
     console.log(`Voice: Re-initiating call to ${playerId}`);
     const pc = createPeer(playerId, true);
@@ -282,7 +310,7 @@ socket.on("playerRejoined", ({ playerId }) => {
   }
 });
 
-// 4. Lobby Updates
+// 4. Lobby Updates (Voice)
 socket.on("lobbyUpdate", (lobby) => {
   myPlayerId = socket.id; 
   if (!myPlayerId || !lobby.players) return;

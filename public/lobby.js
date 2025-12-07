@@ -1,6 +1,10 @@
 // public/lobby.js
 const socket2 = window.socket;
+
+// [FIX] Initialize global window variable for GameUI access
+window.CURRENT_LOBBY = null;
 let CURRENT_LOBBY = null;
+
 let IS_HOST = false;
 let CONTINENT_DATA = {};
 
@@ -38,7 +42,10 @@ function updateQuestionsInput(isMaxActive) {
 }
 
 function updateLobbyUI(lobby) {
+  // [FIX] Sync local variable with global window variable
   CURRENT_LOBBY = lobby;
+  window.CURRENT_LOBBY = lobby;
+  
   IS_HOST = (socket2.id === lobby.hostId);
 
   const title = document.getElementById("lobby-room-title");
@@ -46,14 +53,15 @@ function updateLobbyUI(lobby) {
   const codeSpan = document.getElementById("lobby-room-code");
   const quitBtn = document.getElementById("hud-quit-btn");
   
+  // Always ensure exit button is hidden when entering/updating lobby state
+  // (It only gets unhidden by 'gameStarting' event in gameui.js)
+  quitBtn.classList.add("hidden"); 
+  
   if (lobby.type === 'single') {
     title.innerText = "Single Player";
     statusText.innerText = "Practice Mode";
     codeSpan.innerText = "";
-    quitBtn.classList.remove("hidden"); 
   } else {
-    quitBtn.classList.add("hidden"); 
-    
     if (lobby.type === 'public') {
       title.innerText = "Public Match";
       if (Object.keys(lobby.players).length < 2) {
@@ -186,17 +194,10 @@ function updateLobbyUI(lobby) {
 
 // --- LISTENERS ---
 
-// Listener for Mode Checkboxes
 document.querySelectorAll(".mode-chk").forEach(chk => {
   chk.onchange = () => {
     if (!IS_HOST) return;
-    
-    // Get all currently checked modes
     const allChecked = [...document.querySelectorAll(".mode-chk:checked")].map(x => x.value);
-    
-    // We allow unchecking everything (0 items)
-    // The UI will handle disabling the start button
-    
     socket2.emit("updateLobbySettings", { lobbyCode: CURRENT_LOBBY.code, settings: { modes: allChecked }});
   };
 });
@@ -265,6 +266,7 @@ socket2.on("lobbyUpdate", (lobby) => {
 socket2.on("kicked", () => {
   alert("You have been kicked from the lobby.");
   CURRENT_LOBBY = null;
+  window.CURRENT_LOBBY = null;
   show("mode-screen");
   
   const input = document.getElementById("join-code-input");
@@ -272,9 +274,15 @@ socket2.on("kicked", () => {
   setTimeout(() => { input.value = ""; }, 100);
 });
 
+// [CRITICAL FIX] Force hide the button IMMEDIATELY when clicked
 document.getElementById("hud-quit-btn").onclick = () => {
+  // 1. Force visual hiding immediately
+  document.getElementById("hud-quit-btn").classList.add("hidden");
+
+  // 2. Logic cleanup
   if (CURRENT_LOBBY) socket2.emit("leaveLobby", { lobbyCode: CURRENT_LOBBY.code });
   CURRENT_LOBBY = null;
+  window.CURRENT_LOBBY = null;
   show("mode-screen");
 };
 
@@ -291,11 +299,13 @@ document.getElementById("start-game-btn").onclick = () => { if (CURRENT_LOBBY) s
 document.getElementById("leave-lobby-btn").onclick = () => {
   if (CURRENT_LOBBY) socket2.emit("leaveLobby", { lobbyCode: CURRENT_LOBBY.code });
   CURRENT_LOBBY = null;
+  window.CURRENT_LOBBY = null;
   show("mode-screen");
 };
 document.getElementById("home-btn").onclick = () => {
   if (CURRENT_LOBBY) socket2.emit("leaveLobby", { lobbyCode: CURRENT_LOBBY.code });
   CURRENT_LOBBY = null;
+  window.CURRENT_LOBBY = null;
   show("mode-screen");
 };
 

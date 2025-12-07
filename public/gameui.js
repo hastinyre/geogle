@@ -74,6 +74,15 @@ socket3.on("gameStarting", (settings) => {
     HINTS_ENABLED = (settings && settings.hints === false) ? false : true;
     
     show("game-screen");
+
+    // [NEW] SHOW EXIT BUTTON ONLY IF SINGLE PLAYER
+    const quitBtn = document.getElementById("hud-quit-btn");
+    if (window.CURRENT_LOBBY && window.CURRENT_LOBBY.type === 'single') {
+        quitBtn.classList.remove("hidden");
+    } else {
+        quitBtn.classList.add("hidden");
+    }
+
     const img = document.getElementById("flag-img");
     img.src = ""; 
     img.classList.add("loading-hidden");
@@ -290,6 +299,9 @@ socket3.on("questionEnd", ({ correctCountry, preload }) => {
 });
 
 socket3.on("gameOver", ({ leaderboard }) => {
+  // [NEW] HIDE EXIT BUTTON ON GAME OVER
+  document.getElementById("hud-quit-btn").classList.add("hidden");
+
   show("game-over-screen");
   const tbody = document.getElementById("leaderboard-body");
   tbody.innerHTML = "";
@@ -303,7 +315,6 @@ socket3.on("gameOver", ({ leaderboard }) => {
   } else { tbody.innerHTML = "<tr><td colspan='4'>No stats</td></tr>"; }
 });
 
-// [CRITICAL UPDATE] Robust "Play Again" Logic
 document.getElementById("back-to-lobby-btn").onclick = () => {
   show("lobby-room");
   document.getElementById("ready-btn").innerText = "Ready";
